@@ -16,6 +16,7 @@ import type {
   IisSite,
   NetworkDevice,
   OracleDatabaseMetric,
+  TimelineSample,
   WindowsServer,
 } from '../types/infrastructure.ts';
 
@@ -31,6 +32,7 @@ export interface EngineState {
   alerts: AlertRecord[];
   collectors: CollectorConfig[];
   reports: DailyReportRow[];
+  timeline: TimelineSample[];
 }
 
 function nowTimestamp(): string {
@@ -313,7 +315,10 @@ export class CentralMonitoringEngine {
     const availabilityPct = Number(((onlineAssets / totalAssets) * 100).toFixed(2));
     const openIncidents = this.state.alerts.filter((a) => a.status !== 'Resolved');
     const totalDowntimeMin = this.state.alerts.reduce((a, al) => a + al.downtimeMinutes, 0);
-    const label = nowTimestamp().slice(11, 16);
+    const fullTs = nowTimestamp();
+    const dateStr = fullTs.slice(0, 10);
+    const timeStr = fullTs.slice(11, 19);
+    const label = fullTs.slice(11, 16);
 
     const last = this.state.reports[this.state.reports.length - 1];
     if (last && last.period === label) {
@@ -333,6 +338,103 @@ export class CentralMonitoringEngine {
       });
       if (this.state.reports.length > 24) {
         this.state.reports.shift();
+      }
+    }
+
+    // Record minute-level timeline sample for retroactive date/hour/minute inspection
+    const srvWithRam = this.state.servers.filter((s) => s.metricsAvailable?.ram);
+    const avgRamPct =
+      srvWithRam.length > 0
+        ? Number((srvWithRam.reduce((a, s) => a + s.ramPct, 0) / srvWithRam.length).toFixed(1))
+        : 0;
+    const primaryOra = this.state.oracleDatabases[0];
+    const totalSessions = this.state.oracleDatabases.reduce((a, d) => a + (d.activeSessions || 0), 0);
+    const totalBlocking = this.state.oracleDatabases.reduce((a, d) => a + (d.blockingSessions || 0), 0);
+    const onlineIis = this.state.iisSites.filter((s) => s.responseTimeMs > 0);
+    const avgAppMs =
+      onlineIis.length > 0
+        ? Math.round(onlineIis.reduce((a, s) => a + s.responseTimeMs, 0) / onlineIis.length)
+        : 0;
+    const appErrors1h = this.state.iisSites.reduce((a, s) => a + (s.httpErrors1h || 0), 0);
+    const onlineNet = this.state.networkDevices.filter((n) => n.status !== 'Offline');
+    const avgNetMs =
+      onlineNet.length > 0
+        ? Math.round(onlineNet.reduce((a, n) => a + n.latencyMs, 0) / onlineNet.length)
+        : 0;
+    const maxLossPct =
+      this.state.networkDevices.length > 0
+        ? Math.max(...this.state.networkDevices.map((n) => n.packetLossPct || 0))
+        : 0;
+
+    // Derive DB CPU/IO/Lock wait decomposition from real Oracle metrics & topWaitEvents
+    const topWait = primaryOra?.topWaitEvents?.[0];
+    const waitList = primaryOra?.topWaitEvents ?? [];
+    const ioWaits = waitList
+      .filter((w) => /io|scattered|sequential|direct path|file/i.test(w.event))
+      .reduce((a, w) => a + w.timeWaitedMs, 0);
+    const lockWaits = waitList
+      .filter((w) => /lock|enq|latch|commit|log file/i.test(w.event))
+      .reduce((a, w) => a + w.timeWaitedMs, 0);
+    const totalWaitSum = Math.max(1, ioWaits + lockWaits);
+
+    const dbCpuMs =
+      avgOracleMs > 0
+        ? Math.max(1, Math.round(avgOracleMs * Math.min(0.8, Math.max(0.2, (primaryOra?.cpuUsagePct || 25) / 100))))
+        : 0;
+    const remainingDbMs = Math.max(0, avgOracleMs - dbCpuMs);
+    const dbIoMs =
+      ioWaits > 0
+        ? Math.round(remainingDbMs * (ioWaits / totalWaitSum))
+        : Math.round(remainingDbMs * 0.65);
+    const dbLockMs =
+      totalBlocking > 0
+        ? Math.max(15, totalBlocking * 25 + Math.max(0, remainingDbMs - dbIoMs))
+        : Math.max(0, remainingDbMs - dbIoMs);
+
+    const criticalAlerts = openIncidents.filter((a) => a.severity === 'Critical' || a.severity === 'High').length;
+    const hasOffline =
+      this.state.servers.some((s) => s.status === 'Offline' || s.status === 'Critical') ||
+      this.state.oracleDatabases.some((d) => d.status === 'Offline' || d.status === 'Critical') ||
+      this.state.iisSites.some((i) => i.status === 'Offline' || i.status === 'Critical') ||
+      this.state.networkDevices.some((n) => n.status === 'Offline');
+    const hasIssue = openIncidents.length > 0 || totalBlocking > 0 || hasOffline;
+    const firstAlert = openIncidents[0];
+
+    const sample: TimelineSample = {
+      timestamp: fullTs,
+      date: dateStr,
+      time: timeStr,
+      minuteLabel: label,
+      dbCpuMs,
+      dbIoMs,
+      dbLockMs,
+      appResponseMs: avgAppMs,
+      networkLatencyMs: avgNetMs,
+      serverLoadScore: Math.round(avgCpuPct),
+      serverCpuPct: avgCpuPct,
+      serverRamPct: avgRamPct,
+      oracleResponseMs: avgOracleMs,
+      activeSessions: totalSessions,
+      blockingSessions: totalBlocking,
+      appErrors1h,
+      packetLossPct: maxLossPct,
+      activeAlerts: openIncidents.length,
+      criticalAlerts,
+      hasIssue,
+      issueSummary: firstAlert?.title,
+      issueSummaryAr: firstAlert?.titleAr,
+      topWaitEvent: topWait?.event,
+      topObject: primaryOra?.tablespaces?.[0]?.name,
+      affectedTarget: firstAlert?.assetName || primaryOra?.serviceName || this.state.servers[0]?.hostname,
+    };
+
+    const prevSample = this.state.timeline[this.state.timeline.length - 1];
+    if (prevSample && prevSample.date === dateStr && prevSample.minuteLabel === label) {
+      this.state.timeline[this.state.timeline.length - 1] = sample;
+    } else {
+      this.state.timeline.push(sample);
+      if (this.state.timeline.length > 2000) {
+        this.state.timeline.shift();
       }
     }
   }

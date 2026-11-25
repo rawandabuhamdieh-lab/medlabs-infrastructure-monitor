@@ -660,6 +660,34 @@ export interface DailyReportRow {
   totalDowntimeMin: number;
 }
 
+export interface TimelineSample {
+  timestamp: string; // YYYY-MM-DD HH:MM:SS
+  date: string;      // YYYY-MM-DD
+  time: string;      // HH:MM:SS
+  minuteLabel: string; // HH:MM
+  dbCpuMs: number;
+  dbIoMs: number;
+  dbLockMs: number;
+  appResponseMs: number;
+  networkLatencyMs: number;
+  serverLoadScore: number;
+  serverCpuPct: number;
+  serverRamPct: number;
+  oracleResponseMs: number;
+  activeSessions: number;
+  blockingSessions: number;
+  appErrors1h: number;
+  packetLossPct: number;
+  activeAlerts: number;
+  criticalAlerts: number;
+  hasIssue: boolean;
+  issueSummary?: string;
+  issueSummaryAr?: string;
+  topWaitEvent?: string;
+  topObject?: string;
+  affectedTarget?: string;
+}
+
 export interface WindowsProcessIdentity {
   platform: string;
   hostname: string;

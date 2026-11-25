@@ -1,4 +1,4 @@
-﻿import type { CredentialVault } from './credentialVault.ts';
+import type { CredentialVault } from './credentialVault.ts';
 import {
   buildDefaultUnavailableMetrics,
   getPermittedMethods,

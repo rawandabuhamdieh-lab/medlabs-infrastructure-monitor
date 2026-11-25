@@ -67,6 +67,7 @@ import {
   NetworkDevice,
   OracleDatabaseMetric,
   ThemeMode,
+  TimelineSample,
   UserAccount,
   UserRole,
   WindowsProcessIdentity,
@@ -92,6 +93,8 @@ export default function App() {
   const [adminClaimed, setAdminClaimed] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [polling, setPolling] = useState(false);
+  const [refreshIntervalMs, setRefreshIntervalMs] = useState(30000);
+  const [clockNow, setClockNow] = useState(() => new Date());
 
   // Infrastructure state
   const [servers, setServers] = useState<WindowsServer[]>(INITIAL_WINDOWS_SERVERS);
@@ -105,6 +108,7 @@ export default function App() {
   const [alerts, setAlerts] = useState<AlertRecord[]>(INITIAL_ALERTS);
   const [collectors, setCollectors] = useState<CollectorConfig[]>(INITIAL_COLLECTORS);
   const [reports, setReports] = useState<DailyReportRow[]>(HISTORICAL_REPORTS);
+  const [timeline, setTimeline] = useState<TimelineSample[]>([]);
   const [credentials, setCredentials] = useState<CredentialProfileSummary[]>([]);
   const [vaultPersistent, setVaultPersistent] = useState(false);
   const [processIdentity, setProcessIdentity] = useState<WindowsProcessIdentity | null>(null);
@@ -151,6 +155,7 @@ export default function App() {
         setAlerts(d.alerts);
         setCollectors(d.collectors);
         setReports(d.reports);
+        setTimeline(Array.isArray(d.timeline) ? d.timeline : []);
         setCredentials(d.credentials ?? []);
         setVaultPersistent(Boolean(d.vaultPersistent));
         setProcessIdentity(d.processIdentity ?? null);
@@ -363,6 +368,13 @@ export default function App() {
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
+              <span className="text-xs font-mono font-semibold text-slate-600 dark:text-slate-300 tabular-nums">{clockNow.toLocaleTimeString("en-GB", { timeZone: "Asia/Amman", hour12: false })}</span>
+              <select aria-label="Dashboard refresh interval" value={refreshIntervalMs} onChange={(e) => setRefreshIntervalMs(Number(e.target.value))} className="text-xs rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 px-2 py-1.5">
+                <option value={5000}>5 sec</option>
+                <option value={10000}>10 sec</option>
+                <option value={30000}>30 sec</option>
+                <option value={60000}>60 sec</option>
+              </select>
               <button
                 type="button"
                 onClick={() => fetchSnapshot(authToken)}
@@ -424,9 +436,13 @@ export default function App() {
               servers={servers}
               oracleDatabases={oracleDatabases}
               iisSites={iisSites}
+              appPools={appPools}
+              apiEndpoints={apiEndpoints}
               networkDevices={networkDevices}
+              backups={backups}
               alerts={alerts}
               reports={reports}
+              timeline={timeline}
               lang={lang}
               onNavigate={setActiveSection}
             />

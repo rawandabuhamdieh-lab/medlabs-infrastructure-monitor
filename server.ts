@@ -38,6 +38,7 @@ import type {
   IncidentStatus,
   NetworkDevice,
   OracleDatabaseMetric,
+  TimelineSample,
   UserAccount,
   UserRole,
   WindowsServer,
@@ -116,6 +117,7 @@ const state = {
   alerts: persisted?.alerts ?? structuredClone(INITIAL_ALERTS),
   collectors: persisted?.collectors?.length ? persisted.collectors : structuredClone(INITIAL_COLLECTORS),
   reports: persisted?.reports ?? structuredClone(HISTORICAL_REPORTS),
+  timeline: persisted?.timeline ?? ([] as TimelineSample[]),
   users: structuredClone(INITIAL_USERS) as UserAccount[],
   auditLogs: persisted?.auditLogs ?? (structuredClone(INITIAL_AUDIT_LOGS) as AuditLogEntry[]),
 };
@@ -137,6 +139,7 @@ function persistNow() {
     alerts: state.alerts,
     collectors: state.collectors,
     reports: state.reports,
+    timeline: state.timeline,
     auditLogs: state.auditLogs,
     credentials: vault.exportSerializedRecords(),
   }));
@@ -366,11 +369,25 @@ async function startServer() {
       alerts: state.alerts,
       collectors: state.collectors,
       reports: state.reports,
+      timeline: state.timeline,
       credentials: canManageTargets ? vault.listSummaries() : [],
       vaultPersistent: vault.isPersistentKeyConfigured(),
       processIdentity: canManageTargets ? await detectProcessWindowsIdentity(false) : null,
       users: includeSecurity ? state.users : state.users.map((u) => ({ ...u, email: 'restricted@medlabs.jo' })),
       auditLogs: includeSecurity ? state.auditLogs : [],
+    });
+  });
+
+  app.get('/api/infrastructure/timeline', (req: AuthedRequest, res: Response) => {
+    const requestedDate = typeof req.query?.date === 'string' ? req.query.date.trim().slice(0, 10) : '';
+    const availableDates = Array.from(new Set(state.timeline.map((t) => t.date))).sort();
+    const samples = requestedDate
+      ? state.timeline.filter((t) => t.date === requestedDate)
+      : state.timeline;
+    res.json({
+      date: requestedDate || null,
+      availableDates,
+      samples,
     });
   });
 
@@ -1457,7 +1474,7 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '127.0.0.1', async () => {
+  app.listen(PORT, '0.0.0.0', async () => {
     console.log(`MedLabs IT Infrastructure Intelligence (Agentless Central Engine) running on http://0.0.0.0:${PORT}`);
     const procId = await detectProcessWindowsIdentity(true);
     console.log(
