@@ -1,3 +1,4 @@
+import { formatMedLabsTimestamp } from './time.ts';
 import { execFile } from 'child_process';
 import os from 'os';
 import {
@@ -291,7 +292,7 @@ export class HyperVHostCollector implements ServerCollectorAdapter {
   readonly platform = 'hyperv-host' as const;
 
   async collect(srv: WindowsServer, ctx: CollectorContext): Promise<UnifiedCollectionResult> {
-    const stamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const stamp = formatMedLabsTimestamp();
     const target =
       srv.ipAddress && srv.ipAddress !== '—' && srv.ipAddress !== '-' ? srv.ipAddress : srv.hostname;
     const { prohibitedReasons } = getPermittedMethods(srv);
@@ -498,7 +499,7 @@ export class HyperVVmCollector implements ServerCollectorAdapter {
   readonly platform = 'hyperv-vm' as const;
 
   async collect(srv: WindowsServer, ctx: CollectorContext): Promise<UnifiedCollectionResult> {
-    const stamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const stamp = formatMedLabsTimestamp();
     const target =
       srv.ipAddress && srv.ipAddress !== '—' && srv.ipAddress !== '-' ? srv.ipAddress : srv.hostname;
     const { prohibitedReasons } = getPermittedMethods(srv);

@@ -13,6 +13,7 @@ import {
   Menu,
   Moon,
   Network,
+  Printer,
   RefreshCw,
   Server,
   Shield,
@@ -33,6 +34,7 @@ import {
   NetworkModule,
 } from './components/IisNetworkBackupModules';
 import { OracleModule } from './components/OracleModule';
+import { PrintingMonitoringPanel } from './components/PrintingMonitoringPanel';
 import { ServersModule } from './components/ServersModule';
 import { COPY } from './data/i18n';
 import {
@@ -66,6 +68,8 @@ import {
   ModuleSection,
   NetworkDevice,
   OracleDatabaseMetric,
+  PrintMonitorTarget,
+  ReportExecutionRecord,
   ThemeMode,
   TimelineSample,
   UserAccount,
@@ -108,6 +112,8 @@ export default function App() {
   const [alerts, setAlerts] = useState<AlertRecord[]>(INITIAL_ALERTS);
   const [collectors, setCollectors] = useState<CollectorConfig[]>(INITIAL_COLLECTORS);
   const [reports, setReports] = useState<DailyReportRow[]>(HISTORICAL_REPORTS);
+  const [printTargets, setPrintTargets] = useState<PrintMonitorTarget[]>([]);
+  const [reportExecutions, setReportExecutions] = useState<ReportExecutionRecord[]>([]);
   const [timeline, setTimeline] = useState<TimelineSample[]>([]);
   const [credentials, setCredentials] = useState<CredentialProfileSummary[]>([]);
   const [vaultPersistent, setVaultPersistent] = useState(false);
@@ -155,6 +161,8 @@ export default function App() {
         setAlerts(d.alerts);
         setCollectors(d.collectors);
         setReports(d.reports);
+        setPrintTargets(d.printTargets ?? []);
+        setReportExecutions(d.reportExecutions ?? []);
         setTimeline(Array.isArray(d.timeline) ? d.timeline : []);
         setCredentials(d.credentials ?? []);
         setVaultPersistent(Boolean(d.vaultPersistent));
@@ -238,6 +246,7 @@ export default function App() {
     { id: 'analytics', label: copy.nav.analytics, icon: BarChart3 },
     { id: 'users', label: copy.nav.users, icon: Shield },
     { id: 'architecture', label: copy.nav.architecture, icon: Cpu },
+    { id: 'printing', label: lang === 'ar' ? 'مراقبة الطباعة والتقارير' : 'Printing & Reports', icon: Printer },
   ];
 
   const currentNavLabel = navItems.find((n) => n.id === activeSection)?.label ?? copy.nav.dashboard;
@@ -555,6 +564,23 @@ export default function App() {
               onCreateUser={(payload) => authedFetch('/api/users', 'POST', payload)}
               onToggleUser={(id, active) => authedFetch(`/api/users/${id}`, 'PATCH', { active })}
               onChangeRole={(id, role) => authedFetch(`/api/users/${id}`, 'PATCH', { role })}
+            />
+          )}
+
+          {activeSection === 'printing' && (
+            <PrintingMonitoringPanel
+              printTargets={printTargets}
+              reportExecutions={reportExecutions}
+              currentRole={sessionUser?.role ?? null}
+              lang={lang}
+              onRegisterPrinter={(payload) => authedFetch('/api/printing/printers', 'POST', payload)}
+              onTestPrinter={async (id) => {
+                const result = await authedTestFetch(`/api/printing/printers/${id}/test`);
+                if (result.result) await fetchSnapshot(authToken);
+                return result;
+              }}
+              onPollAllPrinters={() => authedFetch('/api/printing/poll-all', 'POST', {})}
+              onDeletePrinter={(id) => authedFetch(`/api/printing/printers/${id}`, 'DELETE')}
             />
           )}
 

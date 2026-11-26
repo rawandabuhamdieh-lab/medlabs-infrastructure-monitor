@@ -1,3 +1,4 @@
+import { formatMedLabsTimestamp } from './time.ts';
 import type { CredentialVault } from './credentialVault.ts';
 import type {
   ConnectionTestResult,
@@ -125,7 +126,7 @@ export class MethodBackoffTracker {
     return {
       active: true,
       reason: entry.reason,
-      retryAt: new Date(entry.until).toISOString().replace('T', ' ').slice(0, 19),
+      retryAt: formatMedLabsTimestamp(entry.until),
     };
   }
 

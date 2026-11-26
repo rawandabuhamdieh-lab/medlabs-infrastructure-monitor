@@ -1,3 +1,4 @@
+import { formatMedLabsTimestamp } from '../time.ts';
 import type {
   ConnectionTestResult,
   MetricIntegrity,
@@ -23,7 +24,7 @@ export class OracleLinuxServerAdapter implements ServerCollectorAdapter {
   readonly platform = 'oracle-linux' as const;
 
   async collect(srv: WindowsServer, ctx: CollectorContext): Promise<UnifiedCollectionResult> {
-    const stamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const stamp = formatMedLabsTimestamp();
     const target =
       srv.ipAddress && srv.ipAddress !== '—' && srv.ipAddress !== '-' ? srv.ipAddress : srv.hostname;
     const sshPort = srv.sshPort || 22;
@@ -228,7 +229,7 @@ export class OciComputeServerAdapter implements ServerCollectorAdapter {
   readonly platform = 'oci-compute' as const;
 
   async collect(srv: WindowsServer, ctx: CollectorContext): Promise<UnifiedCollectionResult> {
-    const stamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const stamp = formatMedLabsTimestamp();
     const target =
       srv.ipAddress && srv.ipAddress !== '—' && srv.ipAddress !== '-' ? srv.ipAddress : srv.hostname;
     const { prohibitedReasons } = getPermittedMethods(srv);
@@ -373,7 +374,7 @@ export class OracleDbServerAdapter implements ServerCollectorAdapter {
   readonly platform = 'oracle-db' as const;
 
   async collect(srv: WindowsServer, ctx: CollectorContext): Promise<UnifiedCollectionResult> {
-    const stamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const stamp = formatMedLabsTimestamp();
     const target =
       srv.ipAddress && srv.ipAddress !== '—' && srv.ipAddress !== '-' ? srv.ipAddress : srv.hostname;
     const { prohibitedReasons } = getPermittedMethods(srv);

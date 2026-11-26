@@ -13,6 +13,8 @@ import type {
   IisSite,
   NetworkDevice,
   OracleDatabaseMetric,
+  PrintMonitorTarget,
+  ReportExecutionRecord,
   TimelineSample,
   WindowsServer,
 } from '../types/infrastructure.ts';
@@ -29,6 +31,8 @@ export interface PersistedMonitoringState {
   alerts: AlertRecord[];
   collectors: CollectorConfig[];
   reports: DailyReportRow[];
+  printTargets?: PrintMonitorTarget[];
+  reportExecutions?: ReportExecutionRecord[];
   timeline?: TimelineSample[];
   auditLogs: AuditLogEntry[];
   credentials: EncryptedCredentialRecord[];

@@ -1,3 +1,4 @@
+import { formatMedLabsTimestamp } from './time.ts';
 import type { CredentialVault } from './credentialVault.ts';
 import {
   buildDefaultUnavailableMetrics,
@@ -23,7 +24,7 @@ export async function collectNetworkDevice(
   vault: CredentialVault,
   timeoutMs = 2000
 ): Promise<{ ok: boolean; integrity: MetricIntegrity }> {
-  const stamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+  const stamp = formatMedLabsTimestamp();
   const target = dev.ipAddress.trim();
 
   if (!isValidTargetHost(target)) {
@@ -194,7 +195,7 @@ export class NetworkServerAdapter implements ServerCollectorAdapter {
   readonly platform = 'network-device' as const;
 
   async collect(srv: WindowsServer, ctx: CollectorContext): Promise<UnifiedCollectionResult> {
-    const stamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const stamp = formatMedLabsTimestamp();
     const target =
       srv.ipAddress && srv.ipAddress !== 'â€”' && srv.ipAddress !== '-' ? srv.ipAddress : srv.hostname;
     const { prohibitedReasons } = getPermittedMethods(srv);

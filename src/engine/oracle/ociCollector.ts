@@ -9,6 +9,7 @@ import type {
 } from '../../types/infrastructure.ts';
 import { buildOracleHistoryRecord } from './oracleMetrics.ts';
 import type { OciCollectionResult } from './oracleTypes.ts';
+import { formatMedLabsTimestamp } from '../time.ts';
 
 const OCI_REGION_REGEX = /^[a-z]{2}-[a-z0-9-]+-\d+$/;
 const OCI_OCID_REGEX = /^ocid1\.[a-z0-9_.-]+$/i;
@@ -207,7 +208,7 @@ export async function collectOciInfrastructure(params: {
   vault: CredentialVault;
   timeoutMs?: number;
 }): Promise<OciCollectionResult> {
-  const stamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+  const stamp = formatMedLabsTimestamp();
   const started = Date.now();
   const cfg = params.config;
   const timeoutMs = params.timeoutMs ?? 8000;

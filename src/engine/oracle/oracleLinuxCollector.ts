@@ -1,3 +1,4 @@
+import { formatMedLabsTimestamp } from '../time.ts';
 import { Client as SshClient } from 'ssh2';
 import type { CredentialVault } from '../credentialVault.ts';
 import { maskSensitiveText } from '../credentialVault.ts';
@@ -48,7 +49,7 @@ export function validateReadOnlyOracleLinuxCommand(cmd: string): boolean {
 }
 
 export function parseOracleLinuxOutput(raw: string): OracleLinuxOsMetrics {
-  const stamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+  const stamp = formatMedLabsTimestamp();
   const section = (name: string): string => {
     const marker = `===${name}===`;
     const idx = raw.indexOf(marker);
@@ -327,7 +328,7 @@ export async function collectOracleLinuxOs(params: {
   ociMetricsFallback?: OciInstanceMetrics;
   timeoutMs?: number;
 }): Promise<OracleLinuxCollectionResult> {
-  const stamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+  const stamp = formatMedLabsTimestamp();
   const started = Date.now();
   const cfg = params.config;
   const timeoutMs = params.timeoutMs ?? 8000;

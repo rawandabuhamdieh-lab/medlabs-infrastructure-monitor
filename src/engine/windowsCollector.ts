@@ -1,3 +1,4 @@
+import { formatMedLabsTimestamp } from './time.ts';
 import { execFile } from 'child_process';
 import os from 'os';
 import type { CredentialVault } from './credentialVault.ts';
@@ -168,7 +169,7 @@ export async function detectProcessWindowsIdentity(forceRefresh = false): Promis
     return cachedIdentity;
   }
 
-  const stamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+  const stamp = formatMedLabsTimestamp();
   if (process.platform !== 'win32') {
     let uname = 'unknown';
     try {
@@ -934,7 +935,7 @@ export class WindowsServerCollector implements ServerCollectorAdapter {
   readonly platform = 'windows' as const;
 
   async collect(srv: WindowsServer, ctx: CollectorContext): Promise<UnifiedCollectionResult> {
-    const stamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const stamp = formatMedLabsTimestamp();
     const target =
       srv.ipAddress && srv.ipAddress !== 'â€”' && srv.ipAddress !== '-' ? srv.ipAddress : srv.hostname;
     const isLocal = isServerLocalHost(srv);
@@ -1570,7 +1571,7 @@ export async function testWindowsConnection(
   timeoutMs = 8000
 ): Promise<ConnectionTestResult> {
   const started = Date.now();
-  const stamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+  const stamp = formatMedLabsTimestamp();
   const target =
     srv.ipAddress && srv.ipAddress !== 'â€”' && srv.ipAddress !== '-' ? srv.ipAddress : srv.hostname;
   const isLocal = isServerLocalHost(srv);

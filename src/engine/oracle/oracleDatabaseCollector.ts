@@ -1,3 +1,4 @@
+import { formatMedLabsTimestamp } from '../time.ts';
 import oracledb from 'oracledb';
 import type { CredentialVault } from '../credentialVault.ts';
 import type {
@@ -77,7 +78,7 @@ export async function collectOracleDatabaseOnly(
   vault: CredentialVault,
   options?: { timeoutMs?: number; forceAllCadences?: boolean }
 ): Promise<OracleDbCollectionResult> {
-  const stamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+  const stamp = formatMedLabsTimestamp();
   const timeoutMs = options?.timeoutMs ?? db.queryTimeoutMs ?? 8000;
   const connectTimeoutSec = Math.max(3, Math.round((db.connectTimeoutMs ?? timeoutMs) / 1000));
   const force = options?.forceAllCadences === true;
@@ -288,27 +289,78 @@ export async function collectOracleDatabaseOnly(
       }
 
       const lqRows = await runSafeSelect<{
+        SID?: number;
+        SERIAL_NUM?: number;
         SQL_ID: string;
         USERNAME: string;
+        SCHEMA_NAME?: string;
+        OS_USER?: string;
+        MACHINE?: string;
+        PROGRAM?: string;
         ELAPSED_SEC: number;
         WAIT_EVENT: string;
         MODULE: string;
       }>(
         conn,
         ORACLE_READ_ONLY_QUERIES.longRunningQueries,
-        { minElapsedSec: 30 },
+        { minElapsedSec: 15 },
         { ...opts, maxRows: 10 },
         'V$SESSION (Long Queries)',
         missingPermissions
       );
       if (lqRows) {
-        db.longRunningQueries = lqRows.map((r) => ({
-          sqlId: String(r.SQL_ID),
-          username: String(r.USERNAME),
-          elapsedSec: Number(r.ELAPSED_SEC || 0),
-          waitEvent: String(r.WAIT_EVENT),
-          module: String(r.MODULE),
-        }));
+        const enriched: OracleLongQuery[] = [];
+        for (const r of lqRows) {
+          const sqlId = String(r.SQL_ID);
+          const program = String(r.PROGRAM || '');
+          const mod = String(r.MODULE || 'Unknown');
+          let schemaName = String(r.SCHEMA_NAME || r.USERNAME || 'UNKNOWN');
+          let sqlText: string | undefined;
+
+          if (enriched.length < 5) {
+            const sqlRows = await runSafeSelect<{
+              SQL_ID: string;
+              PARSING_SCHEMA_NAME?: string;
+              SQL_TEXT?: string;
+            }>(
+              conn,
+              ORACLE_READ_ONLY_QUERIES.sqlTextBySqlId,
+              { sqlId },
+              opts,
+              'V$SQL',
+              missingPermissions
+            );
+            if (sqlRows?.[0]) {
+              if (sqlRows[0].PARSING_SCHEMA_NAME) {
+                schemaName = String(sqlRows[0].PARSING_SCHEMA_NAME);
+              }
+              if (sqlRows[0].SQL_TEXT) {
+                sqlText = String(sqlRows[0].SQL_TEXT);
+              }
+            }
+          }
+
+          const isReportSession = /report|crystal|jasper|ssrs|print|excel|bi|pdf|toad|sqldeveloper/i.test(
+            `${program} ${mod}`
+          );
+
+          enriched.push({
+            sqlId,
+            username: String(r.USERNAME),
+            schemaName,
+            osUser: r.OS_USER ? String(r.OS_USER) : undefined,
+            machine: r.MACHINE ? String(r.MACHINE) : undefined,
+            program: program || undefined,
+            sid: typeof r.SID === 'number' ? Number(r.SID) : undefined,
+            serial: typeof r.SERIAL_NUM === 'number' ? Number(r.SERIAL_NUM) : undefined,
+            elapsedSec: Number(r.ELAPSED_SEC || 0),
+            waitEvent: String(r.WAIT_EVENT),
+            module: mod,
+            sqlText,
+            isReportSession,
+          });
+        }
+        db.longRunningQueries = enriched;
       }
 
       const weRows = await runSafeSelect<{
@@ -773,7 +825,7 @@ export async function collectOracleCloudVmBundle(
               status: 'Unreachable',
               collectionStatus: 'Unreachable',
               source: 'OCI API',
-              lastAttemptAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
+              lastAttemptAt: formatMedLabsTimestamp(),
               availableMetrics: [],
               unavailableMetrics: [{ metric: 'OCI API', reason: String(ociSettled.reason) }],
               errorDetail: String(ociSettled.reason),
@@ -820,7 +872,7 @@ export async function collectOracleCloudVmBundle(
               status: 'Unreachable',
               collectionStatus: 'Unreachable',
               source: 'Oracle SQL',
-              lastAttemptAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
+              lastAttemptAt: formatMedLabsTimestamp(),
               availableMetrics: [],
               unavailableMetrics: [{ metric: 'Oracle Database', reason: String(dbSettled.reason) }],
               errorDetail: String(dbSettled.reason),

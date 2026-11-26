@@ -1,3 +1,4 @@
+﻿import { formatMedLabsTimestamp } from './time.ts';
 import type { CredentialVault } from './credentialVault.ts';
 import { collectApiEndpoint, collectIisSite } from './iisCollector.ts';
 import { collectNetworkDevice } from './networkCollector.ts';
@@ -36,12 +37,13 @@ export interface EngineState {
 }
 
 function nowTimestamp(): string {
-  return new Date().toISOString().replace('T', ' ').slice(0, 19);
+  return formatMedLabsTimestamp();
 }
 
 export class CentralMonitoringEngine {
   private readonly timers = new Map<string, NodeJS.Timeout>();
   private readonly activeRuns = new Set<string>();
+  private readonly previousOracleWaits = new Map<string, Map<string, number>>();
 
   constructor(
     private readonly state: EngineState,
@@ -55,42 +57,69 @@ export class CentralMonitoringEngine {
     assetId: string;
     assetName: string;
     matchKey: string;
+    dedupKey?: string;
     title: string;
     titleAr: string;
     description: string;
     descriptionAr: string;
+    schemaName?: string;
+    dbUsername?: string;
+    sqlId?: string;
+    sqlText?: string;
+    program?: string;
   }) {
-    const exists = this.state.alerts.some(
+    const key = (params.dedupKey || `${params.module}::${params.assetName}::${params.matchKey}`).toLowerCase();
+    const existing = this.state.alerts.find(
       (a) =>
-        a.assetName.toLowerCase() === params.assetName.toLowerCase() &&
         a.status !== 'Resolved' &&
-        a.title.includes(params.matchKey)
+        ((a.dedupKey && a.dedupKey.toLowerCase() === key) ||
+          (a.assetName.toLowerCase() === params.assetName.toLowerCase() &&
+            a.title.includes(params.matchKey)))
     );
-    if (!exists) {
-      this.state.alerts.unshift({
-        id: `INC-${Math.floor(4100 + Math.random() * 5800)}`,
-        timestamp: nowTimestamp(),
-        severity: params.severity,
-        status: 'Open',
-        module: params.module,
-        assetId: params.assetId,
-        assetName: params.assetName,
-        title: params.title,
-        titleAr: params.titleAr,
-        description: params.description,
-        descriptionAr: params.descriptionAr,
-        acknowledgedBy: null,
-        assignedTo: null,
-        resolutionNotes: '',
-        downtimeMinutes: 0,
-        notifiedChannels: ['NOC Dashboard'],
-      });
-      if (this.state.alerts.length > 250) {
-        this.state.alerts.length = 250;
-      }
+    const ts = nowTimestamp();
+    if (existing) {
+      existing.occurrenceCount = (existing.occurrenceCount ?? 1) + 1;
+      existing.lastSeenAt = ts;
+      existing.dedupKey = existing.dedupKey || key;
+      if (params.schemaName) existing.schemaName = params.schemaName;
+      if (params.dbUsername) existing.dbUsername = params.dbUsername;
+      if (params.sqlId) existing.sqlId = params.sqlId;
+      if (params.sqlText) existing.sqlText = params.sqlText;
+      if (params.program) existing.program = params.program;
+      if (params.severity === 'Critical') existing.severity = 'Critical';
+      return;
+    }
+
+    this.state.alerts.unshift({
+      id: `INC-${Math.floor(4100 + Math.random() * 5800)}`,
+      timestamp: ts,
+      lastSeenAt: ts,
+      occurrenceCount: 1,
+      dedupKey: key,
+      severity: params.severity,
+      status: 'Open',
+      module: params.module,
+      assetId: params.assetId,
+      assetName: params.assetName,
+      title: params.title,
+      titleAr: params.titleAr,
+      description: params.description,
+      descriptionAr: params.descriptionAr,
+      acknowledgedBy: null,
+      assignedTo: null,
+      resolutionNotes: '',
+      downtimeMinutes: 0,
+      notifiedChannels: ['NOC Dashboard'],
+      schemaName: params.schemaName,
+      dbUsername: params.dbUsername,
+      sqlId: params.sqlId,
+      sqlText: params.sqlText,
+      program: params.program,
+    });
+    if (this.state.alerts.length > 250) {
+      this.state.alerts.length = 250;
     }
   }
-
   evaluateServerMetrics(srv: WindowsServer) {
     if (!srv.metricsAvailable?.cpu && !srv.metricsAvailable?.ram && !srv.metricsAvailable?.disk) {
       if (srv.integrity?.collectionStatus === 'Unreachable' && srv.integrity?.dataSource === 'ICMP + TCP Probe') {
@@ -102,9 +131,9 @@ export class CentralMonitoringEngine {
           assetName: srv.hostname,
           matchKey: 'unreachable',
           title: `Server unreachable via ICMP/TCP (${srv.ipAddress})`,
-          titleAr: `تعذر الوصول إلى الخادم ${srv.hostname} (${srv.ipAddress})`,
+          titleAr: `__AR0____AR0____AR0____AR0__ الوصو__AR0__ __AR0____AR0____AR0__ __AR0____AR0____AR0____AR0____AR0____AR0__ ${srv.hostname} (${srv.ipAddress})`,
           description: srv.integrity.errorDetail || 'ICMP/TCP probes failed.',
-          descriptionAr: `فشل الاتصال الشبكي بالخادم ${srv.hostname}.`,
+          descriptionAr: `ف__AR0____AR0__ __AR0____AR0____AR0____AR0____AR0____AR0____AR0__ الشبكي __AR0____AR0____AR0____AR0____AR0____AR0____AR0__ ${srv.hostname}.`,
         });
       }
       return;
@@ -156,9 +185,9 @@ export class CentralMonitoringEngine {
         assetName: srv.hostname,
         matchKey: b.metric,
         title: `${b.metric} threshold exceeded (${b.value}${b.unit})`,
-        titleAr: `تجاوز عتبة ${b.metric} (${b.value}${b.unit}) على ${srv.hostname}`,
+        titleAr: `تجاو__AR0__ __AR0____AR0____AR0____AR0__ ${b.metric} (${b.value}${b.unit}) __AR0____AR0____AR0__ ${srv.hostname}`,
         description: `Central collector measured ${b.metric} at ${b.value}${b.unit} on ${srv.hostname} (${srv.ipAddress}).`,
-        descriptionAr: `سجّل المجمّع المركزي وصول ${b.metric} إلى ${b.value}${b.unit} على الخادم ${srv.hostname}.`,
+        descriptionAr: `__AR0____AR0____AR0____AR0__ __AR0____AR0____AR0____AR0____AR0____AR0____AR0__ المركزي وصو__AR0__ ${b.metric} __AR0____AR0____AR0__ ${b.value}${b.unit} __AR0____AR0____AR0__ __AR0____AR0____AR0____AR0____AR0____AR0__ ${srv.hostname}.`,
       });
     }
   }
@@ -173,9 +202,9 @@ export class CentralMonitoringEngine {
         assetName: db.serviceName,
         matchKey: 'unreachable',
         title: `Oracle DB unreachable (${db.host}:${db.port || 1521}/${db.serviceName})`,
-        titleAr: `تعذر الوصول إلى قاعدة Oracle (${db.serviceName})`,
+        titleAr: `__AR0____AR0____AR0____AR0__ الوصو__AR0__ __AR0____AR0____AR0__ __AR0____AR0____AR0____AR0____AR0__ Oracle (${db.serviceName})`,
         description: db.integrity.errorDetail || 'Oracle connection failed.',
-        descriptionAr: `فشل الاتصال بقاعدة بيانات Oracle ${db.serviceName}.`,
+        descriptionAr: `ف__AR0____AR0__ __AR0____AR0____AR0____AR0____AR0____AR0____AR0__ __AR0____AR0____AR0____AR0____AR0____AR0__ بي__AR0____AR0____AR0____AR0__ Oracle ${db.serviceName}.`,
       });
       return;
     }
@@ -188,24 +217,59 @@ export class CentralMonitoringEngine {
         assetName: db.serviceName,
         matchKey: 'Response Latency',
         title: `Oracle Response Latency critical (${db.responseTimeMs} ms)`,
-        titleAr: `ارتفاع حرج في زمن استجابة Oracle (${db.responseTimeMs} ms)`,
+        titleAr: `ارتف__AR0____AR0__ __AR0____AR0____AR0__ في __AR0____AR0____AR0__ __AR0____AR0____AR0____AR0____AR0____AR0____AR0__ Oracle (${db.responseTimeMs} ms)`,
         description: `Read-only query RTT reached ${db.responseTimeMs}ms on ${db.serviceName}.`,
-        descriptionAr: `وصل زمن استجابة قاعدة Oracle إلى ${db.responseTimeMs}ms.`,
+        descriptionAr: `و__AR0____AR0__ __AR0____AR0____AR0__ __AR0____AR0____AR0____AR0____AR0____AR0____AR0__ __AR0____AR0____AR0____AR0____AR0__ Oracle __AR0____AR0____AR0__ ${db.responseTimeMs}ms.`,
       });
     }
 
     if (db.blockingSessions > 0) {
+      const topQ = db.longRunningQueries[0];
       this.ensureAlert({
         severity: db.blockingSessions >= 3 ? 'Critical' : 'High',
         module: 'Oracle DB',
         assetId: db.id,
         assetName: db.serviceName,
         matchKey: 'Blocking Sessions',
+        dedupKey: `oracle::${db.serviceName}::blocking`,
         title: `Oracle Blocking Sessions detected (${db.blockingSessions})`,
-        titleAr: `رصد جلسات حاجبة في Oracle (${db.blockingSessions})`,
+        titleAr: `__AR0____AR0____AR0__ __AR0____AR0____AR0____AR0____AR0__ __AR0____AR0____AR0____AR0____AR0__ في Oracle (${db.blockingSessions})`,
         description: `Detected ${db.blockingSessions} blocked user sessions in V$SESSION on ${db.serviceName}.`,
-        descriptionAr: `تم رصد ${db.blockingSessions} جلسات حاجبة في قاعدة ${db.serviceName}.`,
+        descriptionAr: `__AR0____AR0__ __AR0____AR0____AR0__ ${db.blockingSessions} __AR0____AR0____AR0____AR0____AR0__ __AR0____AR0____AR0____AR0____AR0__ في __AR0____AR0____AR0____AR0____AR0__ ${db.serviceName}.`,
+        schemaName: topQ?.schemaName,
+        dbUsername: topQ?.username,
+        sqlId: topQ?.sqlId,
+        sqlText: topQ?.sqlText,
+        program: topQ?.program || topQ?.module,
       });
+    }
+
+    for (const q of db.longRunningQueries.slice(0, 3)) {
+      if (q.elapsedSec >= 30) {
+        const schema = q.schemaName || q.username;
+        const isRep = Boolean(q.isReportSession);
+        this.ensureAlert({
+          severity: q.elapsedSec >= 120 ? 'Critical' : 'High',
+          module: 'Oracle DB',
+          assetId: db.id,
+          assetName: db.serviceName,
+          matchKey: q.sqlId,
+          dedupKey: `oracle::${db.serviceName}::sql::${q.sqlId}::${schema}`,
+          title: isRep
+            ? `Report/User Session impacting DB (${q.username} @ ${schema} Â· ${q.elapsedSec}s)`
+            : `Long Running Query ${q.sqlId} in ${schema} (${q.elapsedSec}s)`,
+          titleAr: isRep
+            ? `تأثي__AR0__ __AR0____AR0____AR0____AR0____AR0__ تقري__AR0__ / __AR0____AR0____AR0____AR0____AR0____AR0__ (${q.username} · سكي__AR0____AR0__ ${schema} · ${q.elapsedSec}__AR0__)`
+            : `__AR0____AR0____AR0____AR0____AR0____AR0____AR0__ بطي__AR0__ Long Running Query (${q.sqlId} · سكي__AR0____AR0__ ${schema} · ${q.elapsedSec}__AR0__)`,
+          description: `User ${q.username} in schema ${schema} running ${q.sqlId} via ${q.program || q.module} (${q.waitEvent}).`,
+          descriptionAr: `__AR0____AR0____AR0____AR0____AR0____AR0____AR0____AR0__ ${q.username} __AR0____AR0____AR0__ السكي__AR0____AR0__ ${schema} ينف__AR0__ __AR0____AR0____AR0____AR0____AR0____AR0____AR0____AR0____AR0__ ${q.sqlId} __AR0____AR0____AR0__ ${q.program || q.module} (${q.waitEvent}).`,
+          schemaName: schema,
+          dbUsername: q.username,
+          sqlId: q.sqlId,
+          sqlText: q.sqlText,
+          program: q.program || q.module,
+        });
+      }
     }
   }
 
@@ -219,9 +283,9 @@ export class CentralMonitoringEngine {
         assetName: dev.name,
         matchKey: 'unreachable',
         title: `Network device unreachable (${dev.ipAddress})`,
-        titleAr: `انقطاع الاتصال بجهاز الشبكة ${dev.name} (${dev.ipAddress})`,
+        titleAr: `__AR0____AR0____AR0____AR0____AR0____AR0__ __AR0____AR0____AR0____AR0____AR0____AR0____AR0__ __AR0____AR0____AR0____AR0____AR0__ الشبك__AR0__ ${dev.name} (${dev.ipAddress})`,
         description: dev.integrity?.errorDetail || 'ICMP/SNMP probes failed.',
-        descriptionAr: `تعذر الوصول إلى جهاز الشبكة ${dev.name}.`,
+        descriptionAr: `__AR0____AR0____AR0____AR0__ الوصو__AR0__ __AR0____AR0____AR0__ __AR0____AR0____AR0____AR0__ الشبك__AR0__ ${dev.name}.`,
       });
       return;
     }
@@ -233,9 +297,9 @@ export class CentralMonitoringEngine {
         assetName: dev.name,
         matchKey: 'Packet Loss',
         title: `High Packet Loss (${dev.packetLossPct}%) on ${dev.name}`,
-        titleAr: `ارتفاع فقدان الحزم (${dev.packetLossPct}%) على ${dev.name}`,
+        titleAr: `ارتف__AR0____AR0__ ف__AR0____AR0____AR0____AR0__ __AR0____AR0____AR0____AR0____AR0__ (${dev.packetLossPct}%) __AR0____AR0____AR0__ ${dev.name}`,
         description: `ICMP probe measured ${dev.packetLossPct}% loss (${dev.latencyMs}ms avg) to ${dev.ipAddress}.`,
-        descriptionAr: `بلغت نسبة فقدان الحزم ${dev.packetLossPct}% للجهاز ${dev.name}.`,
+        descriptionAr: `__AR0____AR0____AR0____AR0__ __AR0____AR0____AR0____AR0__ ف__AR0____AR0____AR0____AR0__ __AR0____AR0____AR0____AR0____AR0__ ${dev.packetLossPct}% __AR0____AR0____AR0____AR0____AR0____AR0__ ${dev.name}.`,
       });
     }
   }
@@ -249,9 +313,9 @@ export class CentralMonitoringEngine {
         assetName: site.name,
         matchKey: 'HTTP',
         title: `IIS Web/App HTTP failure (${site.httpStatus || 'Timeout'}) on ${site.name}`,
-        titleAr: `تعطل موقع/تطبيق الويب ${site.name} (${site.httpStatus || 'Timeout'})`,
+        titleAr: `__AR0____AR0____AR0____AR0__ مو__AR0____AR0__/تطبي__AR0__ الوي__AR0__ ${site.name} (${site.httpStatus || 'Timeout'})`,
         description: site.integrity?.errorDetail || `HTTP probe returned ${site.httpStatus} for ${site.url}.`,
-        descriptionAr: `أعاد فحص الموقع ${site.url} حالة ${site.httpStatus || 'انقطاع'}.`,
+        descriptionAr: `__AR0____AR0____AR0____AR0__ ف__AR0____AR0__ المو__AR0____AR0__ ${site.url} __AR0____AR0____AR0____AR0__ ${site.httpStatus || '__AR0____AR0____AR0____AR0____AR0____AR0__'}.`,
       });
     } else if (typeof site.sslDaysRemaining === 'number' && site.sslDaysRemaining <= 14) {
       this.ensureAlert({
@@ -261,9 +325,9 @@ export class CentralMonitoringEngine {
         assetName: site.name,
         matchKey: 'SSL Certificate',
         title: `SSL Certificate expiring in ${site.sslDaysRemaining} days (${site.name})`,
-        titleAr: `قرب انتهاء شهادة SSL خلال ${site.sslDaysRemaining} يوم (${site.name})`,
+        titleAr: `__AR0____AR0____AR0__ __AR0____AR0____AR0____AR0____AR0____AR0__ __AR0____AR0____AR0____AR0____AR0__ SSL __AR0____AR0____AR0____AR0__ ${site.sslDaysRemaining} يو__AR0__ (${site.name})`,
         description: `TLS certificate on ${site.url} expires in ${site.sslDaysRemaining} days.`,
-        descriptionAr: `تنتهي صلاحية شهادة الأمان للموقع ${site.url} خلال ${site.sslDaysRemaining} يوم.`,
+        descriptionAr: `تنتهي صلاحي__AR0__ __AR0____AR0____AR0____AR0____AR0__ __AR0____AR0____AR0____AR0____AR0____AR0__ للمو__AR0____AR0__ ${site.url} __AR0____AR0____AR0____AR0__ ${site.sslDaysRemaining} يو__AR0__.`,
       });
     }
   }
@@ -366,30 +430,34 @@ export class CentralMonitoringEngine {
         ? Math.max(...this.state.networkDevices.map((n) => n.packetLossPct || 0))
         : 0;
 
-    // Derive DB CPU/IO/Lock wait decomposition from real Oracle metrics & topWaitEvents
+    // Calculate interval wait time from cumulative Oracle counters.
     const topWait = primaryOra?.topWaitEvents?.[0];
     const waitList = primaryOra?.topWaitEvents ?? [];
-    const ioWaits = waitList
-      .filter((w) => /io|scattered|sequential|direct path|file/i.test(w.event))
-      .reduce((a, w) => a + w.timeWaitedMs, 0);
-    const lockWaits = waitList
-      .filter((w) => /lock|enq|latch|commit|log file/i.test(w.event))
-      .reduce((a, w) => a + w.timeWaitedMs, 0);
-    const totalWaitSum = Math.max(1, ioWaits + lockWaits);
+    const previousWaits = primaryOra
+      ? this.previousOracleWaits.get(primaryOra.id)
+      : undefined;
 
-    const dbCpuMs =
-      avgOracleMs > 0
-        ? Math.max(1, Math.round(avgOracleMs * Math.min(0.8, Math.max(0.2, (primaryOra?.cpuUsagePct || 25) / 100))))
-        : 0;
-    const remainingDbMs = Math.max(0, avgOracleMs - dbCpuMs);
-    const dbIoMs =
-      ioWaits > 0
-        ? Math.round(remainingDbMs * (ioWaits / totalWaitSum))
-        : Math.round(remainingDbMs * 0.65);
-    const dbLockMs =
-      totalBlocking > 0
-        ? Math.max(15, totalBlocking * 25 + Math.max(0, remainingDbMs - dbIoMs))
-        : Math.max(0, remainingDbMs - dbIoMs);
+    const waitDeltas = waitList.map((w) => ({
+      event: w.event,
+      deltaMs: previousWaits?.has(w.event)
+        ? Math.max(0, w.timeWaitedMs - previousWaits.get(w.event)!)
+        : 0,
+    }));
+
+    if (primaryOra) {
+      this.previousOracleWaits.set(
+        primaryOra.id,
+        new Map(waitList.map((w) => [w.event, w.timeWaitedMs]))
+      );
+    }
+
+    const dbCpuMs = 0;
+    const dbIoMs = Math.round(waitDeltas
+      .filter((w) => /db file|direct path|control file/i.test(w.event))
+      .reduce((a, w) => a + w.deltaMs, 0));
+    const dbLockMs = Math.round(waitDeltas
+      .filter((w) => /enq|lock/i.test(w.event))
+      .reduce((a, w) => a + w.deltaMs, 0));
 
     const criticalAlerts = openIncidents.filter((a) => a.severity === 'Critical' || a.severity === 'High').length;
     const hasOffline =
@@ -507,9 +575,9 @@ export class CentralMonitoringEngine {
                 assetName: b.targetSystem,
                 matchKey: b.jobName,
                 title: `Oracle RMAN Backup Failed: ${b.jobName}`,
-                titleAr: `فشل النسخ الاحتياطي RMAN: ${b.jobName}`,
+                titleAr: `ف__AR0____AR0__ __AR0____AR0____AR0____AR0____AR0__ الاحتياطي RMAN: ${b.jobName}`,
                 description: `V$RMAN_BACKUP_JOB_DETAILS reported ${b.status} on ${b.targetSystem}.`,
-                descriptionAr: `أبلغت Oracle عن فشل مهمة النسخ ${b.jobName}.`,
+                descriptionAr: `__AR0____AR0____AR0____AR0____AR0__ Oracle __AR0____AR0__ ف__AR0____AR0__ __AR0____AR0____AR0____AR0__ __AR0____AR0____AR0____AR0____AR0__ ${b.jobName}.`,
               });
             }
           }
@@ -628,3 +696,6 @@ export class CentralMonitoringEngine {
     }
   }
 }
+
+
+

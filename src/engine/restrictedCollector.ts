@@ -1,3 +1,4 @@
+import { formatMedLabsTimestamp } from './time.ts';
 import { pollSnmpServerMetrics, type SnmpTargetAuth } from '../snmpPoller.ts';
 import {
   buildDefaultUnavailableMetrics,
@@ -46,7 +47,7 @@ export class RestrictedServerCollector implements ServerCollectorAdapter {
   readonly platform = 'restricted' as const;
 
   async collect(srv: WindowsServer, ctx: CollectorContext): Promise<UnifiedCollectionResult> {
-    const stamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const stamp = formatMedLabsTimestamp();
     const target =
       srv.ipAddress && srv.ipAddress !== '—' && srv.ipAddress !== '-' ? srv.ipAddress : srv.hostname;
     const { prohibitedReasons } = getPermittedMethods(srv);

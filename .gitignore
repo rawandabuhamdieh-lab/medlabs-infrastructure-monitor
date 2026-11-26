@@ -18,3 +18,9 @@ data/medlabs-monitoring-state.json
 # Backup and temporary files
 *.backup*
 *.before*
+
+# Backup directories
+backup-*/
+backups/
+**/backup-*/
+**/backups/

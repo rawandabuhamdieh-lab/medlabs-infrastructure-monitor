@@ -41,6 +41,9 @@ import {
 } from '../types/infrastructure';
 import { buildExecutiveDiagnostics, DiagnosticIssue } from '../utils/intelligence';
 import { AssetStatusBadge, IncidentStatusText, SeverityText } from './StatusGlyph';
+function hasDirectDiagnosticEvidence(issue: DiagnosticIssue): boolean {
+  return /DIAG-(ORA-(CONN|LOCK|RTT|TS)|IIS-(DOWN|SLOW|SSL)|POOL|SRV-(OFF|CPU|RAM|DISK|SVC)|NET|BKP)-/.test(issue.id);
+}
 
 interface ExecutiveDashboardProps {
   servers: WindowsServer[];
@@ -220,9 +223,9 @@ export function ExecutiveDashboard({
             date: today,
             time,
             minuteLabel: r.period.slice(0, 5),
-            dbCpuMs: dbCpu,
-            dbIoMs: dbIo,
-            dbLockMs: r.incidentCount > 0 ? r.incidentCount * 12 : 0,
+            dbCpuMs: 0,
+      dbIoMs: 0,
+      dbLockMs: 0,
             appResponseMs: iisSites[0]?.responseTimeMs ?? 0,
             networkLatencyMs: networkDevices[0]?.latencyMs ?? 0,
             serverLoadScore: Math.round(r.avgCpuPct),
@@ -259,9 +262,9 @@ export function ExecutiveDashboard({
             date: today,
             time: nowStr.slice(11, 19),
             minuteLabel: nowStr.slice(11, 16),
-            dbCpuMs: ora ? Math.round(ora.responseTimeMs * 0.45) : 0,
-            dbIoMs: ora ? Math.round(ora.responseTimeMs * 0.45) : 0,
-            dbLockMs: ora ? ora.blockingSessions * 20 : 0,
+            dbCpuMs: 0,
+      dbIoMs: 0,
+      dbLockMs: 0,
             appResponseMs: iis?.responseTimeMs ?? 0,
             networkLatencyMs: net?.latencyMs ?? 0,
             serverLoadScore: Math.round(srv?.cpuPct ?? 0),
@@ -378,6 +381,33 @@ export function ExecutiveDashboard({
   const criticalIssuesCount = diagnostics.filter((d) => d.severity === 'Critical').length;
   const warningIssuesCount = diagnostics.filter((d) => d.severity === 'Warning').length;
 
+  // System Components Health Overview - uses live collected data only
+  const summarizeHealth = (statuses: string[]) => {
+    const result = { healthy: 0, warning: 0, critical: 0, unknown: 0 };
+    for (const value of statuses) {
+      const status = String(value || '').toLowerCase();
+      if (['healthy', 'online', 'running', 'up', 'succeeded', 'success', 'normal', 'active'].includes(status)) result.healthy++;
+      else if (['warning', 'degraded'].includes(status)) result.warning++;
+      else if (['critical', 'offline', 'failed', 'down', 'error'].includes(status)) result.critical++;
+      else result.unknown++;
+    }
+    const state =
+      result.critical > 0 ? 'critical' :
+      result.warning > 0 || result.unknown > 0 ? 'warning' :
+      result.healthy > 0 ? 'healthy' : 'unknown';
+    return { ...result, state, total: statuses.length };
+  };
+
+  const componentHealthCards = [
+    { key: 'oracle', title: isAr ? 'قواعد البيانات' : 'Databases', detail: isAr ? 'Oracle Database' : 'Oracle Database', health: summarizeHealth(oracleDatabases.map(x => String(x.status))), section: 'oracle' as ModuleSection },
+    { key: 'apps', title: isAr ? 'التطبيقات والخدمات' : 'Applications & Services', detail: isAr ? 'IIS وواجهات API' : 'IIS Sites & API Endpoints', health: summarizeHealth([...iisSites, ...apiEndpoints].map(x => String(x.status))), section: 'iis' as ModuleSection },
+    { key: 'servers', title: isAr ? 'الخوادم' : 'Windows Servers', detail: isAr ? 'حالة الخوادم' : 'Server availability', health: summarizeHealth(servers.map(x => String(x.status))), section: 'servers' as ModuleSection },
+    { key: 'network', title: isAr ? 'الشبكة' : 'Network', detail: isAr ? 'أجهزة الشبكة' : 'Network devices', health: summarizeHealth(networkDevices.map(x => String(x.status))), section: 'network' as ModuleSection },
+    { key: 'backups', title: isAr ? 'النسخ الاحتياطي' : 'Backups', detail: isAr ? 'مهام النسخ' : 'Backup jobs', health: summarizeHealth(backups.map(x => String(x.status))), section: 'backups' as ModuleSection },
+    { key: 'loadbalancer', title: isAr ? 'موازنات الأحمال' : 'Load Balancers', detail: isAr ? 'لا يوجد ربط مراقبة فعّال' : 'No active monitoring integration', health: summarizeHealth([]) },
+    { key: 'printing', title: isAr ? 'الطباعة والتقارير' : 'Printing & Reports', detail: isAr ? 'بانتظار ربط بيانات المراقبة' : 'Monitoring data not integrated yet', health: summarizeHealth([]) },
+  ];
+
   // Core KPI Summaries (DB, Application, Servers, Network & Backups)
   const primaryOracle = oracleDatabases[0] ?? null;
   const oracleProblem =
@@ -446,11 +476,11 @@ export function ExecutiveDashboard({
     unit: string;
   }[] = [
     { key: 'dbCpuMs', labelEn: 'DB CPU & Query', labelAr: 'معالج قاعدة البيانات', color: '#10b981', unit: 'ms' },
-    { key: 'dbIoMs', labelEn: 'DB User I/O', labelAr: 'قراءة وكتابة الأقراص DB', color: '#8b5cf6', unit: 'ms' },
-    { key: 'dbLockMs', labelEn: 'DB Locks & Waits', labelAr: 'الأقفال والانتظار DB', color: '#f59e0b', unit: 'ms' },
-    { key: 'appResponseMs', labelEn: 'App / IIS Response', labelAr: 'استجابة التطبيقات IIS', color: '#3b82f6', unit: 'ms' },
+    { key: 'dbIoMs', labelEn: 'DB User I/O', labelAr: 'إدخال وإخراج قاعدة البيانات DB', color: '#8b5cf6', unit: 'ms' },
+    { key: 'dbLockMs', labelEn: 'DB Locks & Waits', labelAr: 'أقفال قاعدة البيانات والانتظار DB', color: '#f59e0b', unit: 'ms' },
+    { key: 'appResponseMs', labelEn: 'App / IIS Response', labelAr: 'استجابة التطبيق وIIS', color: '#3b82f6', unit: 'ms' },
     { key: 'networkLatencyMs', labelEn: 'Network Latency', labelAr: 'تأخير الشبكة', color: '#06b6d4', unit: 'ms' },
-    { key: 'serverLoadScore', labelEn: 'Server CPU Load', labelAr: 'حمل معالج الخوادم', color: '#e11d48', unit: '%' },
+    { key: 'serverLoadScore', labelEn: 'Server CPU Load', labelAr: 'حمل المعالج على الخادم', color: '#e11d48', unit: '%' },
   ];
 
   const legendTotals = useMemo(() => {
@@ -486,7 +516,7 @@ export function ExecutiveDashboard({
       const pct = Number(((w.timeWaitedMs / totalWaitMs) * 100).toFixed(1));
       rows.push({
         name: w.event,
-        category: isAr ? 'قاعدة البيانات' : 'Oracle Wait',
+        category: isAr ? 'انتظار Oracle' : 'Oracle Wait',
         pct,
         detail: `${w.timeWaitedMs} ms (${w.totalWaits} waits)`,
         severity: pct >= 40 ? 'Warning' : 'Normal',
@@ -642,13 +672,13 @@ export function ExecutiveDashboard({
         <div>
           <h1 className="text-xl font-semibold text-slate-900 dark:text-slate-100 text-balance">
             {isAr
-              ? 'لوحة القيادة التنفيذية · مراقبة الأداء وتحليل الأعطال'
+              ? 'لوحة القيادة التنفيذية · مراقبة البنية التحتية وتحليل الأداء'
               : 'Executive Infrastructure Dashboard · Performance & Wait Analysis'}
           </h1>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
             <span>
               {isAr
-                ? 'مراقبة قواعد البيانات والتطبيقات والخوادم بدقة الساعة والدقيقة مع الرجوع لأي يوم سابق'
+                ? 'مراقبة مباشرة لحالة قاعدة البيانات والتطبيقات والخوادم والشبكة، مع إمكانية الرجوع لأي يوم ومراجعة التفاصيل بالدقيقة'
                 : 'Minute-by-minute visibility across Oracle DB, Applications/IIS, Servers, and Network'}
             </span>
             <span aria-hidden="true">·</span>
@@ -691,7 +721,7 @@ export function ExecutiveDashboard({
               >
                 {preset === 'all'
                   ? isAr
-                    ? 'اليوم كامل'
+                    ? 'اليوم ككل'
                     : 'Full Day'
                   : preset === '1h'
                     ? isAr
@@ -737,11 +767,68 @@ export function ExecutiveDashboard({
         </div>
       </div>
 
+      {/* System Components Health Overview */}
+      <section className="space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+              {isAr ? 'الحالة الصحية لمكونات النظام' : 'System Components Health Overview'}
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              {isAr ? 'ملخص مباشر مبني على البيانات المتاحة من مصادر المراقبة' : 'Live summary based on available monitoring sources'}
+            </p>
+          </div>
+          <span className="text-xs text-slate-500 dark:text-slate-400">
+            {isAr ? 'المكونات: 7' : '7 Components'}
+          </span>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+          {componentHealthCards.map((item) => {
+            const stateStyle =
+              item.health.state === 'healthy'
+                ? 'border-emerald-200 dark:border-emerald-900 bg-emerald-50/70 dark:bg-emerald-950/20'
+                : item.health.state === 'warning'
+                  ? 'border-amber-200 dark:border-amber-900 bg-amber-50/70 dark:bg-amber-950/20'
+                  : item.health.state === 'critical'
+                    ? 'border-red-200 dark:border-red-900 bg-red-50/70 dark:bg-red-950/20'
+                    : 'border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/40';
+            const stateLabel =
+              item.health.state === 'healthy' ? (isAr ? 'سليم' : 'Healthy') :
+              item.health.state === 'warning' ? (isAr ? 'تحذير / بيانات جزئية' : 'Warning / Partial') :
+              item.health.state === 'critical' ? (isAr ? 'حرج' : 'Critical') :
+              (isAr ? 'غير متاح' : 'Unknown / No Data');
+            return (
+              <button
+                key={item.key}
+                type="button"
+                disabled={!item.section}
+                onClick={() => { if (item.section) onNavigate(item.section); }}
+                className={`text-left rounded-lg border p-4 transition-colors ${stateStyle} ${item.section ? 'hover:shadow-sm cursor-pointer' : 'cursor-default'}`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">{item.title}</span>
+                  <span className="text-xs font-semibold whitespace-nowrap">{stateLabel}</span>
+                </div>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{item.detail}</p>
+                <div className="mt-4 flex items-end justify-between gap-2">
+                  <span className="text-2xl font-semibold tabular-nums text-slate-900 dark:text-slate-100">{item.health.total}</span>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">
+                    {item.health.total > 0
+                      ? `${item.health.healthy} ${isAr ? 'سليم' : 'healthy'} · ${item.health.warning} ${isAr ? 'تحذير' : 'warning'} · ${item.health.critical} ${isAr ? 'حرج' : 'critical'}`
+                      : (isAr ? 'لا توجد بيانات فعلية' : 'No collected data')}
+                  </span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
       {/* Quick Retroactive Date Switcher Bar */}
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="text-slate-500 dark:text-slate-400">
-            {isAr ? 'أيام سابقة متاحة:' : 'Quick Dates:'}
+            {isAr ? 'تواريخ سريعة:' : 'Quick Dates:'}
           </span>
           {quickDates.map((d) => {
             const isToday = d === todayIsoDate();
@@ -758,7 +845,7 @@ export function ExecutiveDashboard({
                     : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:border-blue-400'
                 }`}
               >
-                {isToday ? (isAr ? `اليوم (${d})` : `Today (${d})`) : isYesterday ? (isAr ? `أمس (${d})` : `Yesterday (${d})`) : d}
+                {isToday ? (isAr ? `اليوم` : `Today (${d})`) : isYesterday ? (isAr ? `أمس` : `Yesterday (${d})`) : d}
               </button>
             );
           })}
@@ -766,9 +853,9 @@ export function ExecutiveDashboard({
         <div className="font-mono tabular-nums text-slate-500 dark:text-slate-400">
           {loadingDate
             ? isAr
-              ? 'جارٍ تحميل السجل...'
+              ? 'جارٍ تحميل البيانات...'
               : 'Loading date history...'
-            : `${chartData.length} ${isAr ? 'نقطة قياس' : 'samples'}`}
+            : `عينات`}
         </div>
       </div>
 
@@ -794,15 +881,15 @@ export function ExecutiveDashboard({
                 <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
                   {criticalIssuesCount > 0
                     ? isAr
-                      ? `تنبيه حرج: تم رصد ${criticalIssuesCount} مشكلة حرجة و ${warningIssuesCount} تحذير`
+                      ? `تنبيهات حرجة: يوجد ${criticalIssuesCount} مشكلة حرجة و ${warningIssuesCount} تحذير`
                       : `Critical Alert: ${criticalIssuesCount} critical issue(s) and ${warningIssuesCount} warning(s) detected`
                     : isAr
-                      ? `تنبيه تحذيري: تم رصد ${warningIssuesCount} ملاحظة تحتاج متابعة`
+                      ? `تنبيه تحذيري: يوجد ${warningIssuesCount} تحذيرًا يتطلب المراجعة`
                       : `Warning Alert: ${warningIssuesCount} warning(s) require attention`}
                 </div>
                 <div className="text-xs text-slate-700 dark:text-slate-300">
                   <span className="font-semibold">
-                    {isAr ? 'أهم مشكلة حالياً: ' : 'Top Issue: '}
+                    {isAr ? 'أهم مشكلة حالية: ' : 'Top Issue: '}
                   </span>
                   <span>{isAr ? diagnostics[0].whatAr : diagnostics[0].whatEn}</span>
                   <span className="mx-1.5" aria-hidden="true">·</span>
@@ -828,14 +915,14 @@ export function ExecutiveDashboard({
                 }}
                 className="px-3.5 py-2 rounded-md bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 text-xs font-medium hover:opacity-90 whitespace-nowrap shrink-0 cursor-pointer"
               >
-                {isAr ? 'عرض كل التفاصيل والحلول' : 'View All Fixes'}
+                {isAr ? 'عرض جميع التفاصيل والحلول' : 'View All Fixes'}
               </button>
               <button
                 type="button"
                 onClick={() => onNavigate(diagnostics[0].targetSection)}
                 className="inline-flex items-center gap-1 px-3 py-2 rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 text-xs font-medium hover:bg-slate-50 dark:hover:bg-slate-800 whitespace-nowrap shrink-0 cursor-pointer"
               >
-                <span>{isAr ? 'فتح القسم المتأثر' : 'Open Affected Tab'}</span>
+                <span>{isAr ? 'فتح الشاشة المتأثرة' : 'Open Affected Tab'}</span>
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
             </div>
@@ -848,7 +935,7 @@ export function ExecutiveDashboard({
               <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
               <span className="font-medium">
                 {isAr
-                  ? 'جميع قواعد البيانات والتطبيقات والخوادم المراقبة تعمل ضمن الحدود الطبيعية بدون تنبيهات نشطة.'
+                  ? 'جميع مؤشرات قاعدة البيانات والتطبيقات والخوادم والشبكة ضمن الحدود الطبيعية، ولا توجد تنبيهات حاليًا.'
                   : 'All monitored databases, applications, servers, and network links are operating within normal thresholds.'}
               </span>
             </div>
@@ -875,7 +962,7 @@ export function ExecutiveDashboard({
             {oracleProblem ? (
               <AssetStatusBadge status={oracleProblem} label={copy.status[oracleProblem]} />
             ) : (
-              <span className="text-[11px] text-slate-400">{isAr ? 'غير مربوط' : 'Not Connected'}</span>
+              <span className="text-[11px] text-slate-400">{isAr ? 'غير متصل' : 'Not Connected'}</span>
             )}
           </div>
           <div className="mt-2.5 flex items-baseline justify-between gap-2">
@@ -883,7 +970,7 @@ export function ExecutiveDashboard({
               {primaryOracle ? `${primaryOracle.responseTimeMs} ms` : '—'}
             </div>
             <div className="text-xs font-mono tabular-nums text-slate-500 dark:text-slate-400 truncate">
-              {primaryOracle ? primaryOracle.serviceName : isAr ? 'أضف قاعدة بيانات' : 'Configure Oracle'}
+              {primaryOracle ? primaryOracle.serviceName : isAr ? 'أضف اتصال قاعدة البيانات' : 'Configure Oracle'}
             </div>
           </div>
           <div className="mt-2 flex items-center gap-2 text-[11px] font-mono tabular-nums text-slate-600 dark:text-slate-400">
@@ -892,7 +979,7 @@ export function ExecutiveDashboard({
             </span>
             <span aria-hidden="true">·</span>
             <span className={(primaryOracle?.blockingSessions ?? 0) > 0 ? 'text-rose-600 dark:text-rose-400 font-semibold' : ''}>
-              {isAr ? 'أقفال:' : 'Locks:'} {primaryOracle?.blockingSessions ?? 0}
+              {isAr ? 'الأقفال:' : 'Locks:'} {primaryOracle?.blockingSessions ?? 0}
             </span>
             <span aria-hidden="true">·</span>
             <span>SGA {primaryOracle?.sgaUsedPct ?? 0}%</span>
@@ -908,12 +995,12 @@ export function ExecutiveDashboard({
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-xs font-medium text-slate-600 dark:text-slate-300">
               <Globe className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
-              <span>{isAr ? 'أداء التطبيقات (IIS / API)' : 'Application & IIS Health'}</span>
+              <span>{isAr ? 'حالة التطبيقات (IIS / API)' : 'Application & IIS Health'}</span>
             </div>
             {iisProblem ? (
               <AssetStatusBadge status={iisProblem} label={copy.status[iisProblem]} />
             ) : (
-              <span className="text-[11px] text-slate-400">{isAr ? 'لا تطبيقات' : 'No Apps'}</span>
+              <span className="text-[11px] text-slate-400">{isAr ? 'لا توجد تطبيقات' : 'No Apps'}</span>
             )}
           </div>
           <div className="mt-2.5 flex items-baseline justify-between gap-2">
@@ -921,7 +1008,7 @@ export function ExecutiveDashboard({
               {iisSites.length > 0 ? `${avgIisRtt} ms` : '—'}
             </div>
             <div className="text-xs font-mono tabular-nums text-slate-500 dark:text-slate-400">
-              {iisOnlineCount}/{iisSites.length} {isAr ? 'موقع متصل' : 'sites online'}
+              {iisOnlineCount}/{iisSites.length} {isAr ? 'مواقع متصلة' : 'sites online'}
             </div>
           </div>
           <div className="mt-2 flex items-center gap-2 text-[11px] font-mono tabular-nums text-slate-600 dark:text-slate-400">
@@ -940,12 +1027,12 @@ export function ExecutiveDashboard({
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 text-xs font-medium text-slate-600 dark:text-slate-300">
               <Server className="w-4 h-4 text-violet-600 dark:text-violet-400 shrink-0" />
-              <span>{isAr ? 'صحة الخوادم (Servers)' : 'Server Infrastructure'}</span>
+              <span>{isAr ? 'بنية الخوادم (Servers)' : 'Server Infrastructure'}</span>
             </div>
             {serverProblem ? (
               <AssetStatusBadge status={serverProblem} label={copy.status[serverProblem]} />
             ) : (
-              <span className="text-[11px] text-slate-400">{isAr ? 'لا خوادم' : 'No Servers'}</span>
+              <span className="text-[11px] text-slate-400">{isAr ? 'لا توجد خوادم' : 'No Servers'}</span>
             )}
           </div>
           <div className="mt-2.5 flex items-baseline justify-between gap-2">
@@ -960,7 +1047,7 @@ export function ExecutiveDashboard({
             <span>RAM {avgServerRam}%</span>
             <span aria-hidden="true">·</span>
             <span>
-              {isAr ? 'تنبيهات:' : 'Alerts:'} {alerts.filter((a) => a.status !== 'Resolved').length}
+              {isAr ? 'التنبيهات:' : 'Alerts:'} {alerts.filter((a) => a.status !== 'Resolved').length}
             </span>
           </div>
         </button>
@@ -979,7 +1066,7 @@ export function ExecutiveDashboard({
             {netProblem ? (
               <AssetStatusBadge status={netProblem} label={copy.status[netProblem]} />
             ) : (
-              <span className="text-[11px] text-slate-400">{isAr ? 'لا بيانات' : 'No Data'}</span>
+              <span className="text-[11px] text-slate-400">{isAr ? 'لا توجد بيانات' : 'No Data'}</span>
             )}
           </div>
           <div className="mt-2.5 flex items-baseline justify-between gap-2">
@@ -987,7 +1074,7 @@ export function ExecutiveDashboard({
               {networkDevices.length > 0 ? `${avgNetLatency} ms` : '—'}
             </div>
             <div className="text-xs font-mono tabular-nums text-slate-500 dark:text-slate-400">
-              {netOnline}/{networkDevices.length} {isAr ? 'فرع/جهاز' : 'devices'}
+              {netOnline}/{networkDevices.length} {isAr ? 'أجهزة' : 'devices'}
             </div>
           </div>
           <div className="mt-2 flex items-center gap-2 text-[11px] font-mono tabular-nums text-slate-600 dark:text-slate-400">
@@ -1012,17 +1099,17 @@ export function ExecutiveDashboard({
               <Clock className="w-4 h-4 text-blue-600 dark:text-blue-400" />
               <span>
                 {isAr
-                  ? 'مخطط المراقبة الزمني (بالساعة والدقيقة) — اضغط على أي عمود لتحديد الفترة'
+                  ? 'أداء السلسلة الزمنية وتوزيع أوقات الانتظار (بالساعة والدقيقة)'
                   : 'Time-Series Performance & Wait Breakdown (Hour & Minute)'}
               </span>
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-mono tabular-nums">
               {isAr
-                ? `النطاق المعروض: من ${windowFromLabel} إلى ${windowToLabel}`
+                ? `الفترة المعروضة: من ${windowFromLabel} إلى ${windowToLabel}`
                 : `Selected Window: From ${windowFromLabel} To ${windowToLabel}`}
               {anchorIdx !== null && (
                 <span className="ms-2 text-blue-600 dark:text-blue-400 font-sans font-medium">
-                  {isAr ? '· اختر نقطة النهاية لتحديد نطاق زمني' : '· Click a second bar to complete range'}
+                  {isAr ? '· انقر على عمود ثانٍ لإكمال تحديد النطاق الزمني' : '· Click a second bar to complete range'}
                 </span>
               )}
             </p>
@@ -1044,10 +1131,10 @@ export function ExecutiveDashboard({
                 <p className="text-xs text-slate-600 dark:text-slate-400 max-w-lg leading-relaxed">
                   {selectedDate === todayIsoDate()
                     ? isAr
-                      ? 'لا توجد قراءات مسجلة لهذا اليوم بعد. بمجرد ربط قاعدة بيانات Oracle أو تطبيق IIS أو خادم من التبويبات أدناه، سيبدأ النظام تلقائياً برسم الأعمدة الزمنية دقيقة بدقيقة.'
+                      ? 'لا تتوفر بيانات كافية لعرض التحليل حاليًا. اختر تاريخًا آخر أو راجع التبويبات أدناه، وسيتم تحديث التحليل تلقائيًا وفق الفترة الزمنية المحددة، دقيقة بدقيقة.'
                       : 'No telemetry samples recorded for this date yet. Connect an Oracle Database, IIS site, or Server to begin minute-by-minute stacked wait & performance tracking.'
                     : isAr
-                      ? `لا توجد سجلات مراقبة محفوظة لتاريخ ${selectedDate}. اختر تاريخاً آخر من الشريط أعلاه.`
+                      ? `لا توجد بيانات محفوظة للتاريخ ${selectedDate}. يتم عرض البيانات المتاحة لهذا التاريخ من السجل الزمني.`
                       : `No recorded telemetry found for ${selectedDate}. Choose another date above.`}
                 </p>
                 <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
@@ -1094,7 +1181,14 @@ export function ExecutiveDashboard({
                       textAnchor="end"
                       height={42}
                     />
-                    <YAxis tick={{ fontSize: 11, fill: '#64748b' }} />
+                    <YAxis yAxisId="ms" tick={{ fontSize: 11, fill: '#64748b' }} />
+                    <YAxis
+                      yAxisId="percent"
+                      orientation="right"
+                      domain={[0, 100]}
+                      tick={{ fontSize: 11, fill: '#e11d48' }}
+                      tickFormatter={(value) => `${value}%`}
+                    />
                     <Tooltip
                       cursor={{ fill: 'rgba(37, 99, 235, 0.08)' }}
                       content={({ active, payload }) => {
@@ -1107,11 +1201,11 @@ export function ExecutiveDashboard({
                             </div>
                             <div className="grid grid-cols-2 gap-x-4 gap-y-1 font-mono tabular-nums text-[11px]">
                               <span className="text-emerald-400">DB CPU:</span>
-                              <span className="text-end">{pt.dbCpuMs} ms</span>
+                              <span className="text-end">{pt.dbCpuMs > 0 ? pt.dbCpuMs + ' ms' : '—'}</span>
                               <span className="text-violet-400">DB I/O:</span>
-                              <span className="text-end">{pt.dbIoMs} ms</span>
+                              <span className="text-end">{pt.dbIoMs > 0 ? pt.dbIoMs + ' ms' : '—'}</span>
                               <span className="text-amber-400">DB Locks:</span>
-                              <span className="text-end">{pt.dbLockMs} ms</span>
+                              <span className="text-end">{pt.dbLockMs > 0 ? pt.dbLockMs + ' ms' : '—'}</span>
                               <span className="text-blue-400">App / IIS:</span>
                               <span className="text-end">{pt.appResponseMs} ms</span>
                               <span className="text-cyan-400">Network:</span>
@@ -1122,7 +1216,7 @@ export function ExecutiveDashboard({
                             {pt.hasIssue && (
                               <div className="pt-1 border-t border-slate-800 text-[11px] text-rose-300 font-medium">
                                 {isAr
-                                  ? pt.issueSummaryAr || 'تم رصد مشكلة أو تجاوز عتبة في هذه الدقيقة'
+                                  ? pt.issueSummaryAr || 'لا توجد معلومات كافية عن المشكلة أو التجاوز في هذه الدقيقة'
                                   : pt.issueSummary || 'Issue / threshold breach recorded at this minute'}
                               </div>
                             )}
@@ -1146,7 +1240,7 @@ export function ExecutiveDashboard({
                         <Bar
                           key={s.key}
                           dataKey={s.key}
-                          stackId="infra"
+                          yAxisId={s.key === 'serverLoadScore' ? 'percent' : 'ms'}
                           name={isAr ? s.labelAr : s.labelEn}
                           fill={s.color}
                           className="cursor-pointer"
@@ -1175,7 +1269,7 @@ export function ExecutiveDashboard({
           {/* Right 3 Columns: MyOra-Style Legend & Window Values Table */}
           <div className="lg:col-span-3 border border-slate-200 dark:border-slate-800 rounded-md overflow-hidden">
             <div className="px-3 py-2 bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between text-[11px] font-semibold text-slate-600 dark:text-slate-300">
-              <span>{isAr ? 'مكونات الأداء (اضغط للفلترة)' : 'Wait & Load Legend'}</span>
+              <span>{isAr ? 'دليل أوقات الانتظار والأحمال (مقارنة بالفترة السابقة)' : 'Wait & Load Legend'}</span>
               <span>{isAr ? 'المتوسط' : 'Avg'}</span>
             </div>
             <div className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -1210,7 +1304,7 @@ export function ExecutiveDashboard({
             </div>
             <div className="px-3 py-2.5 bg-slate-50 dark:bg-slate-950/60 border-t border-slate-200 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400 space-y-1 font-mono tabular-nums">
               <div className="flex justify-between">
-                <span>{isAr ? 'حوادث في هذا اليوم:' : 'Alerts on date:'}</span>
+                <span>{isAr ? 'حول التنبيهات في هذا اليوم:' : 'Alerts on date:'}</span>
                 <span className={alertsForSelectedDate.length > 0 ? 'text-rose-600 dark:text-rose-400 font-semibold' : ''}>
                   {alertsForSelectedDate.length}
                 </span>
@@ -1231,12 +1325,12 @@ export function ExecutiveDashboard({
         <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
           <div className="font-semibold text-slate-800 dark:text-slate-200">
             {isAr
-              ? `تفاصيل الفترة (${windowFromLabel} — ${windowToLabel})`
+              ? `تفاصيل الفترة (${windowFromLabel} إلى ${windowToLabel})`
               : `Window Details From (${windowFromLabel}) To (${windowToLabel})`}
           </div>
           <div className="text-slate-500 dark:text-slate-400">
             {isAr
-              ? 'الأحداث والاختناقات · المكان الدقيق للمشكلة · التشخيص واقتراح الحل'
+              ? 'تحليل شامل ومفصل · تحديد الموقع الدقيق للمشكلة · التشخيص والحلول المقترحة'
               : 'Events · Exact Objects & Locations · Diagnosis, Suggested Fix & Sessions'}
           </div>
         </div>
@@ -1246,7 +1340,7 @@ export function ExecutiveDashboard({
           <div className="lg:col-span-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg overflow-hidden flex flex-col">
             <div className="px-4 py-2.5 bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
               <h3 className="text-xs font-semibold text-slate-900 dark:text-slate-100">
-                {isAr ? '1. الأحداث والاختناقات (Events)' : '1. Events & Bottlenecks'}
+                {isAr ? '1. الأحداث ونقاط الاختناق (Events)' : '1. Events & Bottlenecks'}
               </h3>
               <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
                 {waitAndEventRows.length}
@@ -1256,7 +1350,7 @@ export function ExecutiveDashboard({
             {waitAndEventRows.length === 0 ? (
               <div className="p-6 text-center text-xs text-slate-500 dark:text-slate-400 my-auto">
                 {isAr
-                  ? 'لا توجد أحداث انتظار أو اختناقات مسجلة في هذه الفترة.'
+                  ? 'لا تتوفر بيانات كافية لتحديد الأحداث أو نقاط الاختناق في هذه الفترة.'
                   : 'No wait events or bottlenecks recorded in this window.'}
               </div>
             ) : (
@@ -1309,7 +1403,7 @@ export function ExecutiveDashboard({
           <div className="lg:col-span-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg overflow-hidden flex flex-col">
             <div className="px-4 py-2.5 bg-slate-50 dark:bg-slate-800/60 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
               <h3 className="text-xs font-semibold text-slate-900 dark:text-slate-100">
-                {isAr ? '2. أين المشكلة بالظبط؟ (Objects & Targets)' : '2. Exact Location & Objects'}
+                {isAr ? '2. أين المشكلة بالضبط؟ (Objects & Targets)' : '2. Exact Location & Objects'}
               </h3>
               <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
                 {locationObjects.length}
@@ -1319,7 +1413,7 @@ export function ExecutiveDashboard({
             {locationObjects.length === 0 ? (
               <div className="p-6 text-center text-xs text-slate-500 dark:text-slate-400 my-auto">
                 {isAr
-                  ? 'ستظهر هنا الجداول ومساحات التخزين وتطبيقات IIS والخوادم المراقبة.'
+                  ? 'تفاصيل الجداول وإجراءات التخزين وتطبيقات IIS والخوادم المتأثرة'
                   : 'Monitored tablespaces, IIS apps, servers, and network nodes appear here.'}
               </div>
             ) : (
@@ -1327,7 +1421,7 @@ export function ExecutiveDashboard({
                 <table className="w-full text-xs text-start">
                   <thead className="border-b border-slate-100 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400">
                     <tr>
-                      <th className="py-2 px-3 text-start font-medium">{isAr ? 'المالك / الموقع' : 'Owner'}</th>
+                      <th className="py-2 px-3 text-start font-medium">{isAr ? 'المالك / المسؤول' : 'Owner'}</th>
                       <th className="py-2 px-2 text-start font-medium">{isAr ? 'العنصر' : 'Object'}</th>
                       <th className="py-2 px-2 text-start font-medium">{isAr ? 'النوع' : 'Type'}</th>
                       <th className="py-2 px-3 text-end font-medium">{isAr ? 'القيمة' : 'Value'}</th>
@@ -1387,7 +1481,7 @@ export function ExecutiveDashboard({
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
                   }`}
                 >
-                  {isAr ? `3. المشكلة والحل (${diagnostics.length})` : `3. Diagnosis & Fix (${diagnostics.length})`}
+                  {isAr ? `3. المشكلة والتشخيص (${diagnostics.length})` : `3. Diagnosis & Fix (${diagnostics.length})`}
                 </button>
                 <button
                   type="button"
@@ -1407,7 +1501,7 @@ export function ExecutiveDashboard({
               diagnostics.length === 0 ? (
                 <div className="p-6 text-center text-xs text-slate-500 dark:text-slate-400 my-auto">
                   {isAr
-                    ? 'لا توجد مشاكل مرصودة حالياً. عند حدوث أي عطل أو بطء سيظهر هنا: ما هي المشكلة، مكانها بالضبط، واقتراح الحل.'
+                    ? 'لا توجد مشاكل مرصودة حاليًا. عند حدوث أي بطء أو توقف، سيتم تحديد المشكلة ومكانها بالضبط، مع عرض التشخيص والحل المقترح.'
                     : 'No issues detected. When a problem occurs, its clear explanation, exact location, and suggested fix will appear here.'}
                 </div>
               ) : (
@@ -1452,7 +1546,7 @@ export function ExecutiveDashboard({
 
                       <div className="text-slate-700 dark:text-slate-300 font-mono text-[11px]">
                         <span className="font-sans text-slate-500 dark:text-slate-400">
-                          {isAr ? 'المكان بالظبط: ' : 'Exact Location: '}
+                          {isAr ? 'الموقع الدقيق المتأثر: ' : 'Exact Location: '}
                         </span>
                         {isAr ? issue.whereAr : issue.whereEn}
                       </div>
@@ -1467,13 +1561,32 @@ export function ExecutiveDashboard({
                         </span>
                       </div>
 
+                      <div className="rounded-md border border-slate-200 dark:border-slate-700 px-2.5 py-2 text-[11px] leading-relaxed">
+                        <span className="font-semibold text-slate-700 dark:text-slate-200">
+                          {isAr ? 'تقييم الدليل: ' : 'Evidence assessment: '}
+                        </span>
+                        {hasDirectDiagnosticEvidence(issue) ? (
+                          <span className="text-emerald-700 dark:text-emerald-400">
+                            {isAr
+                              ? 'حالة مرصودة مباشرة من بيانات المراقبة. هذا يثبت الحالة، لكنه لا يثبت وحده السبب الجذري.'
+                              : 'Directly observed monitoring condition. This confirms the condition, but does not by itself prove the root cause.'}
+                          </span>
+                        ) : (
+                          <span className="text-amber-700 dark:text-amber-400">
+                            {isAr
+                              ? 'مؤشر يحتاج إلى مقارنته بمؤشرات أخرى قبل تأكيد السبب الجذري.'
+                              : 'An indicator that must be correlated with other metrics before confirming the root cause.'}
+                          </span>
+                        )}
+                      </div>
+
                       <div className="pt-0.5">
                         <button
                           type="button"
                           onClick={() => onNavigate(issue.targetSection)}
                           className="text-[11px] font-medium text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
                         >
-                          {isAr ? 'الانتقال إلى المصدر ←' : 'Inspect target module →'}
+                          {isAr ? 'فحص الوحدة المستهدفة ←' : 'Inspect target module →'}
                         </button>
                       </div>
                     </div>
@@ -1483,7 +1596,7 @@ export function ExecutiveDashboard({
             ) : activeDbSessions.length === 0 ? (
               <div className="p-6 text-center text-xs text-slate-500 dark:text-slate-400 my-auto">
                 {isAr
-                  ? 'لا توجد جلسات Oracle طويلة أو معلّقة مرصودة حالياً.'
+                  ? 'لا توجد مؤشرات على استعلامات Oracle طويلة أو اختناقات مرصودة حاليًا.'
                   : 'No long-running or active Oracle SQL sessions captured.'}
               </div>
             ) : (
@@ -1524,7 +1637,7 @@ export function ExecutiveDashboard({
           <div className="px-5 py-3 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between">
             <h2 className="text-xs font-semibold text-slate-900 dark:text-slate-100">
               {isAr
-                ? `سجل التنبيهات والحوادث بتاريخ ${selectedDate}`
+                ? `التنبيهات والحوادث بتاريخ ${selectedDate}`
                 : `Alerts & Incidents Recorded on ${selectedDate}`}
             </h2>
             <button
@@ -1532,7 +1645,7 @@ export function ExecutiveDashboard({
               onClick={() => onNavigate('alerts')}
               className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
             >
-              {isAr ? 'إدارة كل التنبيهات' : 'Manage All Alerts'}
+              {isAr ? 'إدارة جميع التنبيهات' : 'Manage All Alerts'}
             </button>
           </div>
           <div className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -1562,3 +1675,10 @@ export function ExecutiveDashboard({
     </div>
   );
 }
+
+
+
+
+
+
+

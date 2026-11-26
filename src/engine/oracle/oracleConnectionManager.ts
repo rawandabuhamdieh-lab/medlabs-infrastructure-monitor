@@ -38,15 +38,33 @@ export function ensureOracleDriverMode(): {
     const tnsDir = process.env.TNS_ADMIN?.trim();
     if (libDir && fs.existsSync(libDir)) {
       try {
+        if (process.platform === 'win32') {
+          const normalizedLibDir = libDir.replace(/[\\/]+$/, '').toLowerCase();
+          const pathEntries = (process.env.PATH || '').split(';');
+          const alreadyInPath = pathEntries.some(
+            (entry) => entry.replace(/[\\/]+$/, '').toLowerCase() === normalizedLibDir
+          );
+
+          if (!alreadyInPath) {
+            process.env.PATH = `${libDir};${process.env.PATH || ''}`;
+          }
+
+          const oracleHome = libDir.replace(/[\\/]bin[\\/]?$/i, '');
+          if (oracleHome !== libDir) {
+            process.env.ORACLE_HOME = oracleHome;
+          }
+        }
+
         oracledb.initOracleClient({
           libDir,
           ...(tnsDir && fs.existsSync(tnsDir) ? { configDir: tnsDir } : {}),
         });
+
         thickInitialized = true;
         thickInitNote = `Thick mode initialized from ORACLE_CLIENT_LIB_DIR (${libDir}).`;
       } catch (err) {
         thickInitialized = false;
-        thickInitNote = `Instant Client init skipped (${maskSensitiveText(err instanceof Error ? err.message : String(err))}); using node-oracledb Thin mode.`;
+        thickInitNote = `Oracle Client initialization failed (${maskSensitiveText(err instanceof Error ? err.message : String(err))}); using node-oracledb Thin mode.`;
       }
     }
   }

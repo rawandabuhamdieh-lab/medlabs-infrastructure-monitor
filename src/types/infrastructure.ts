@@ -11,7 +11,8 @@ export type ModuleSection =
   | 'alerts'
   | 'analytics'
   | 'users'
-  | 'architecture';
+  | 'architecture'
+  | 'printing';
 
 export type UserRole =
   | 'Administrator'
@@ -283,9 +284,17 @@ export interface OracleTablespace {
 export interface OracleLongQuery {
   sqlId: string;
   username: string;
+  schemaName?: string;
+  osUser?: string;
+  machine?: string;
+  program?: string;
+  sid?: number;
+  serial?: number;
   elapsedSec: number;
   waitEvent: string;
   module: string;
+  sqlText?: string;
+  isReportSession?: boolean;
 }
 
 export interface OracleWaitEvent {
@@ -583,6 +592,9 @@ export interface BackupJob {
 export interface AlertRecord {
   id: string;
   timestamp: string;
+  lastSeenAt?: string;
+  occurrenceCount?: number;
+  dedupKey?: string;
   severity: AlertSeverity;
   status: IncidentStatus;
   module: 'Windows Server' | 'Oracle DB' | 'IIS & App' | 'Network' | 'Backup';
@@ -597,6 +609,11 @@ export interface AlertRecord {
   resolutionNotes: string;
   downtimeMinutes: number;
   notifiedChannels: string[];
+  schemaName?: string;
+  dbUsername?: string;
+  sqlId?: string;
+  sqlText?: string;
+  program?: string;
 }
 
 export interface AlertThreshold {
@@ -727,4 +744,107 @@ export interface ConnectionTestResult {
   checks?: DiagnosticCheckItem[];
   doubleHopWarning?: string;
   capabilityMatrix?: MonitoringCapabilityMatrix;
+}
+
+
+export type MonitoringComponentKey =
+  | 'oracle'
+  | 'application'
+  | 'network'
+  | 'user'
+  | 'queries'
+  | 'schema'
+  | 'loadBalancer';
+
+export type ComponentHealthLevel = 'Healthy' | 'Warning' | 'Degraded' | 'Critical' | 'Unknown';
+
+export type DataProvenance = 'Measured' | 'Calculated' | 'Estimated' | 'Unavailable';
+
+export interface LoadBalancerBackendNode {
+  name: string;
+  urlOrHost: string;
+  port?: number;
+  status: 'Up' | 'Down' | 'Degraded' | 'Unknown';
+  responseTimeMs: number | null;
+  requestsCount?: number | null;
+  trafficSharePct?: number | null;
+  failedRequests?: number | null;
+  lastError?: string;
+}
+
+export interface LoadBalancerTarget {
+  id: string;
+  name: string;
+  vipUrl: string;
+  statsUrl?: string;
+  site: string;
+  status: AssetStatus;
+  responseTimeMs: number | null;
+  failedRequests: number | null;
+  connectionErrors: number;
+  unhealthyNodesCount: number;
+  unevenTrafficDetected: boolean;
+  trafficDistributionNote?: string;
+  nodes: LoadBalancerBackendNode[];
+  lastCheck: string;
+  integrity?: MetricIntegrity;
+}
+
+export interface PrintMonitorTarget {
+  id: string;
+  name: string;
+  site: string;
+  hostOrIp: string;
+  protocol: 'RAW-9100' | 'IPP-631' | 'LPD-515' | 'Windows-Spooler';
+  port: number;
+  spoolerHost?: string;
+  credentialId?: string;
+  status: AssetStatus;
+  responseTimeMs: number | null;
+  queueDepth: number | null;
+  failedJobs24h: number | null;
+  printerStateLabel?: string;
+  lastCheck: string;
+  integrity?: MetricIntegrity;
+  tested?: boolean;
+}
+
+export interface ReportExecutionRecord {
+  id: string;
+  reportName: string;
+  requestedBy: string;
+  timestamp: string;
+  status: 'Completed' | 'Slow' | 'Timeout' | 'Failed';
+  totalDurationMs: number;
+  reportGenerationMs: number | null;
+  appProcessingMs: number | null;
+  dbQueryMs: number | null;
+  networkMs: number | null;
+  printerResponseMs: number | null;
+  queueDelayMs: number | null;
+  sqlId?: string;
+  schemaName?: string;
+  printerId?: string;
+  suspectedBottleneck:
+    | 'Report Generation'
+    | 'Application Processing'
+    | 'Oracle Query Execution'
+    | 'Network Communication'
+    | 'Printer Response'
+    | 'Printing Queue'
+    | 'Undetermined';
+  provenance: DataProvenance;
+}
+
+export interface AiAnalysisResponse {
+  generatedAt: string;
+  model: string;
+  problemExplanation: string;
+  rootCause: string;
+  evidence: string[];
+  businessImpact: string;
+  recommendedSolution: string[];
+  priority: 'Critical' | 'High' | 'Medium' | 'Low';
+  verificationSteps: string[];
+  insufficientDataNote?: string;
 }

@@ -1,3 +1,4 @@
+import { formatMedLabsTimestamp } from './time.ts';
 import { Client as SshClient } from 'ssh2';
 import { pollSnmpServerMetrics, type SnmpTargetAuth } from '../snmpPoller.ts';
 import { maskSensitiveText } from './credentialVault.ts';
@@ -325,7 +326,7 @@ export class LinuxServerCollector implements ServerCollectorAdapter {
   readonly platform = 'linux' as const;
 
   async collect(srv: WindowsServer, ctx: CollectorContext): Promise<UnifiedCollectionResult> {
-    const stamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const stamp = formatMedLabsTimestamp();
     const target =
       srv.ipAddress && srv.ipAddress !== '—' && srv.ipAddress !== '-' ? srv.ipAddress : srv.hostname;
     const sshPort = srv.sshPort || 22;

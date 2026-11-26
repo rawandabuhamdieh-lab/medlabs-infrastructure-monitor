@@ -1,3 +1,4 @@
+import { formatMedLabsTimestamp } from './time.ts';
 import { execFile } from 'child_process';
 import tls from 'tls';
 import type { CredentialVault } from './credentialVault.ts';
@@ -153,7 +154,7 @@ export async function collectIisSite(
   vault: CredentialVault,
   timeoutMs = 6000
 ): Promise<{ ok: boolean; integrity: MetricIntegrity; discoveredPools: IisAppPool[] }> {
-  const stamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+  const stamp = formatMedLabsTimestamp();
   const parsedUrl = isValidHttpUrl(site.url);
   if (!parsedUrl) {
     const integrity: MetricIntegrity = {
@@ -263,7 +264,7 @@ export async function collectApiEndpoint(
   api: ApiEndpointCheck,
   timeoutMs = 5000
 ): Promise<{ ok: boolean; integrity: MetricIntegrity }> {
-  const stamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+  const stamp = formatMedLabsTimestamp();
   const parsedUrl = isValidHttpUrl(api.url);
   if (!parsedUrl) {
     const integrity: MetricIntegrity = {

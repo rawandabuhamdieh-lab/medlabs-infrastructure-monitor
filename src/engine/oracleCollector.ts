@@ -1,5 +1,7 @@
+import { formatMedLabsTimestamp } from './time.ts';
 import oracledb from 'oracledb';
 import { ensureOracleDriverMode } from './oracle/oracleConnectionManager.ts';
+import { ORACLE_READ_ONLY_QUERIES } from './oracle/oracleDatabaseQueries.ts';
 import type { CredentialVault } from './credentialVault.ts';
 import type {
   BackupJob,
@@ -56,7 +58,7 @@ export async function collectOracleDatabase(
   timeoutMs = 8000
 ): Promise<{ ok: boolean; integrity: MetricIntegrity; rmanBackups: BackupJob[] }> {
   ensureOracleDriverMode();
-  const stamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+  const stamp = formatMedLabsTimestamp();
   const port = db.port || 1521;
   const connectString = `${db.host}:${port}/${db.serviceName}`;
 
@@ -209,26 +211,58 @@ export async function collectOracleDatabase(
     let waitEvents: OracleWaitEvent[] = [];
     try {
       const lqRes = await conn.execute<{
+        SID: number;
+        SERIAL_NUM: number;
         SQL_ID: string;
         USERNAME: string;
+        SCHEMA_NAME: string;
+        OS_USER: string;
+        MACHINE: string;
+        PROGRAM: string;
         ELAPSED_SEC: number;
         WAIT_EVENT: string;
         MODULE: string;
       }>(
-        `SELECT SQL_ID, NVL(USERNAME, 'SYSTEM') AS USERNAME, LAST_CALL_ET AS ELAPSED_SEC,
-                NVL(EVENT, 'CPU') AS WAIT_EVENT, NVL(MODULE, 'Unknown') AS MODULE
-         FROM V$SESSION
-         WHERE STATUS = 'ACTIVE' AND TYPE = 'USER' AND LAST_CALL_ET > 30 AND SQL_ID IS NOT NULL
-         ORDER BY LAST_CALL_ET DESC`,
-        [],
+        ORACLE_READ_ONLY_QUERIES.longRunningQueries,
+        { minElapsedSec: 15 },
         { ...opts, maxRows: 10 }
       );
-      longQueries = (lqRes.rows || []).map((r) => ({
+
+      const rawQueries = lqRes.rows || [];
+      const sqlTexts = new Map<string, string>();
+
+      for (const q of rawQueries.slice(0, 5)) {
+        try {
+          const textRes = await conn.execute<{
+            SQL_TEXT: string;
+          }>(
+            ORACLE_READ_ONLY_QUERIES.sqlTextBySqlId,
+            { sqlId: q.SQL_ID },
+            opts
+          );
+          const sqlText = textRes.rows?.[0]?.SQL_TEXT;
+          if (sqlText) sqlTexts.set(q.SQL_ID, String(sqlText));
+        } catch {
+          // SQL text is optional; preserve collection if access is restricted.
+        }
+      }
+
+      longQueries = rawQueries.map((r) => ({
         sqlId: String(r.SQL_ID),
         username: String(r.USERNAME),
+        schemaName: String(r.SCHEMA_NAME || r.USERNAME),
+        osUser: String(r.OS_USER || ''),
+        machine: String(r.MACHINE || ''),
+        program: String(r.PROGRAM || ''),
+        sid: Number(r.SID),
+        serial: Number(r.SERIAL_NUM),
         elapsedSec: Number(r.ELAPSED_SEC || 0),
         waitEvent: String(r.WAIT_EVENT),
         module: String(r.MODULE),
+        sqlText: sqlTexts.get(r.SQL_ID),
+        isReportSession: /report|power.?bi|crystal|care.?net|apex/i.test(
+          `${r.PROGRAM || ''} ${r.MODULE || ''}`
+        ),
       }));
 
       const weRes = await conn.execute<{

@@ -1,3 +1,4 @@
+import { formatMedLabsTimestamp } from '../time.ts';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -223,6 +224,6 @@ export function discoverOracleTnsAndWallets(params?: {
     walletDirectoriesDetected,
     oracledbThinSupported: params?.oracledbThinSupported ?? true,
     oracledbThickInitialized: params?.oracledbThickInitialized ?? false,
-    checkedAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
+    checkedAt: formatMedLabsTimestamp(),
   };
 }

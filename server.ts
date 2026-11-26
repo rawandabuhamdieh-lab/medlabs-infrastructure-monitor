@@ -1,3 +1,4 @@
+import { formatMedLabsTimestamp } from './src/engine/time.ts';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 import express, { NextFunction, Request, Response } from 'express';
@@ -9,6 +10,7 @@ import { CredentialVault } from './src/engine/credentialVault.ts';
 import { collectApiEndpoint, collectIisSite, testIisSiteConnection } from './src/engine/iisCollector.ts';
 import { CentralMonitoringEngine } from './src/engine/monitoringEngine.ts';
 import { collectNetworkDevice, testNetworkConnection } from './src/engine/networkCollector.ts';
+import { collectPrintTarget } from './src/engine/printingCollector.ts';
 import { isValidTargetHost } from './src/engine/networkHelpers.ts';
 import { collectOracleDatabase, testOracleConnection } from './src/engine/oracleCollector.ts';
 import { loadPersistedState, schedulePersistState } from './src/engine/persistenceStore.ts';
@@ -38,6 +40,7 @@ import type {
   IncidentStatus,
   NetworkDevice,
   OracleDatabaseMetric,
+  PrintMonitorTarget,
   TimelineSample,
   UserAccount,
   UserRole,
@@ -117,6 +120,8 @@ const state = {
   alerts: persisted?.alerts ?? structuredClone(INITIAL_ALERTS),
   collectors: persisted?.collectors?.length ? persisted.collectors : structuredClone(INITIAL_COLLECTORS),
   reports: persisted?.reports ?? structuredClone(HISTORICAL_REPORTS),
+  printTargets: persisted?.printTargets ?? ([] as PrintMonitorTarget[]),
+  reportExecutions: persisted?.reportExecutions ?? [],
   timeline: persisted?.timeline ?? ([] as TimelineSample[]),
   users: structuredClone(INITIAL_USERS) as UserAccount[],
   auditLogs: persisted?.auditLogs ?? (structuredClone(INITIAL_AUDIT_LOGS) as AuditLogEntry[]),
@@ -139,6 +144,8 @@ function persistNow() {
     alerts: state.alerts,
     collectors: state.collectors,
     reports: state.reports,
+    printTargets: state.printTargets,
+    reportExecutions: state.reportExecutions,
     timeline: state.timeline,
     auditLogs: state.auditLogs,
     credentials: vault.exportSerializedRecords(),
@@ -163,7 +170,7 @@ if (envAdminPasscode.length > 0) {
 }
 
 function nowTimestamp(): string {
-  return new Date().toISOString().replace('T', ' ').slice(0, 19);
+  return formatMedLabsTimestamp();
 }
 
 function appendAudit(
@@ -369,6 +376,8 @@ async function startServer() {
       alerts: state.alerts,
       collectors: state.collectors,
       reports: state.reports,
+      printTargets: state.printTargets,
+      reportExecutions: state.reportExecutions,
       timeline: state.timeline,
       credentials: canManageTargets ? vault.listSummaries() : [],
       vaultPersistent: vault.isPersistentKeyConfigured(),
@@ -1217,6 +1226,141 @@ async function startServer() {
         `${removed.name} (${removed.ipAddress})`,
         'Success',
         'Removed network target.'
+      );
+      res.json({ deleted: removed.id });
+    }
+  );
+
+  // ==================== PRINTING & REPORT MONITORING ====================
+  app.post(
+    '/api/printing/printers',
+    requireRole(['Administrator', 'IT Manager', 'IT Engineer']),
+    (req: AuthedRequest, res: Response) => {
+      const name = typeof req.body?.name === 'string' ? req.body.name.trim().slice(0, 100) : '';
+      const hostOrIp = typeof req.body?.hostOrIp === 'string' ? req.body.hostOrIp.trim().slice(0, 253) : '';
+      const site = typeof req.body?.site === 'string' ? req.body.site.trim().slice(0, 100) : 'MedLabs Central';
+      const protocols: PrintMonitorTarget['protocol'][] = ['RAW-9100', 'IPP-631', 'LPD-515', 'Windows-Spooler'];
+      const protocol = protocols.includes(req.body?.protocol) ? req.body.protocol : null;
+      const port = Number(req.body?.port);
+      const spoolerHost = typeof req.body?.spoolerHost === 'string'
+        ? req.body.spoolerHost.trim().slice(0, 253)
+        : '';
+
+      if (!name || !hostOrIp || !isValidTargetHost(hostOrIp) || !protocol ||
+          !Number.isInteger(port) || port < 1 || port > 65535 ||
+          (spoolerHost && !isValidTargetHost(spoolerHost))) {
+        res.status(400).json({ error: 'Valid printer name, host, protocol and port are required.' });
+        return;
+      }
+
+      const created: PrintMonitorTarget = {
+        id: nextPrefixedId(state.printTargets, 'PRN'),
+        name,
+        site: site || 'MedLabs Central',
+        hostOrIp,
+        protocol,
+        port,
+        spoolerHost: spoolerHost || undefined,
+        status: 'Offline',
+        responseTimeMs: null,
+        queueDepth: null,
+        failedJobs24h: null,
+        printerStateLabel: 'Not tested',
+        lastCheck: 'Not tested',
+        tested: false,
+      };
+
+      // Registration only stores configuration. It does not probe the printer.
+      state.printTargets.unshift(created);
+      persistNow();
+      appendAudit(
+        req.sessionUser!.username,
+        req.sessionUser!.role,
+        'PRINT_TARGET_ADDED',
+        `${name} (${hostOrIp}:${port})`,
+        'Success',
+        'Printer registered without running a connection test.'
+      );
+      res.status(201).json(created);
+    }
+  );
+
+  app.post(
+    '/api/printing/printers/:id/test',
+    requireRole(['Administrator', 'IT Manager', 'IT Engineer']),
+    async (req: AuthedRequest, res: Response) => {
+      const printer = state.printTargets.find((p) => p.id === req.params.id);
+      if (!printer) {
+        res.status(404).json({ error: 'Printer target not found.' });
+        return;
+      }
+
+      const outcome = await collectPrintTarget(printer, vault);
+      persistNow();
+      appendAudit(
+        req.sessionUser!.username,
+        req.sessionUser!.role,
+        'PRINT_TARGET_TEST',
+        `${printer.name} (${printer.hostOrIp}:${printer.port})`,
+        outcome.ok ? 'Success' : 'Denied',
+        `${outcome.integrity.collectionStatus}: ${outcome.integrity.errorDetail || outcome.integrity.dataSource}`
+      );
+      res.json({
+        ok: outcome.ok,
+        status: outcome.integrity.collectionStatus,
+        dataSource: outcome.integrity.dataSource,
+        latencyMs: printer.responseTimeMs,
+        measuredAt: outcome.integrity.measuredAt,
+        details: outcome.ok
+          ? `Printer ${printer.name} reachable in ${printer.responseTimeMs} ms${printer.queueDepth !== null ? ` · Queue=${printer.queueDepth}` : ''}.`
+          : outcome.integrity.errorDetail || 'Printer unreachable.',
+        prerequisiteHint: outcome.integrity.prerequisiteHint,
+      });
+    }
+  );
+
+  app.post(
+    '/api/printing/poll-all',
+    requireRole(['Administrator', 'IT Manager', 'IT Engineer']),
+    async (req: AuthedRequest, res: Response) => {
+      let tested = 0;
+      let reachable = 0;
+      for (const printer of state.printTargets) {
+        const outcome = await collectPrintTarget(printer, vault);
+        tested += 1;
+        if (outcome.ok) reachable += 1;
+      }
+      persistNow();
+      appendAudit(
+        req.sessionUser!.username,
+        req.sessionUser!.role,
+        'PRINT_TARGETS_POLL_ALL',
+        `${tested} printers`,
+        'Success',
+        `Manual sweep completed. Reachable=${reachable}; Unreachable=${tested - reachable}.`
+      );
+      res.json({ polled: tested, reachable });
+    }
+  );
+
+  app.delete(
+    '/api/printing/printers/:id',
+    requireRole(['Administrator', 'IT Manager', 'IT Engineer']),
+    (req: AuthedRequest, res: Response) => {
+      const idx = state.printTargets.findIndex((p) => p.id === req.params.id);
+      if (idx === -1) {
+        res.status(404).json({ error: 'Printer target not found.' });
+        return;
+      }
+      const [removed] = state.printTargets.splice(idx, 1);
+      persistNow();
+      appendAudit(
+        req.sessionUser!.username,
+        req.sessionUser!.role,
+        'PRINT_TARGET_DELETED',
+        `${removed.name} (${removed.hostOrIp})`,
+        'Success',
+        'Removed printer monitoring target.'
       );
       res.json({ deleted: removed.id });
     }
